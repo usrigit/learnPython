@@ -5,6 +5,8 @@ from bs4 import BeautifulSoup
 # url = 'http://www.moneycontrol.com/india/stockpricequote/diversified/3mindia/MI42'
 # print(url.split("/")[5])
 
+results = {}
+
 
 def mny_ctr_shr_frm_url(cmp_name, cmp_url):
 
@@ -25,7 +27,8 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
             if __tag_name and __tag_value:
                 dict_comp[__tag_name] = __tag_value
                 __tag_name, __tag_value = None, None
-    return dict_comp
+    results[cmp_name] = dict_comp
+
 
 if __name__ == "__main__":
     title = 'Cyient'

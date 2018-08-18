@@ -4,6 +4,9 @@ import requests
 import bs4
 import time
 
+"""
+parallel IO operations are possible using threads. This is because performing IO operations releases the GIL
+"""
 print_lock = threading.Lock()
 
 
@@ -14,12 +17,12 @@ def get_url(current_url):
     res.raise_for_status()
 
     current_page = bs4.BeautifulSoup(res.text, "html.parser")
-    print(current_page)
+    # print(current_page)
     current_title = current_page.select('title')[0].getText()
 
     with print_lock:
         print("{}\n".format(threading.current_thread().name))
-        print("{}\n".format(current_url))
+        # print("{}\n".format(current_url))
         print("{}\n".format(current_title))
         print("\nFinished fetching : {}".format(current_url))
 
@@ -33,9 +36,9 @@ def process_queue():
 
 url_queue = Queue()
 
-url_list = ["https://www.nseindia.com/live_market/dynaContent/live_watch/equities_stock_watch.htm"]
+url_list = ["https://www.nseindia.com/live_market/dynaContent/live_watch/equities_stock_watch.htm"]*5
 
-for i in range(1):
+for i in range(3):
     t = threading.Thread(target=process_queue)
     t.daemon = True
     t.start()
