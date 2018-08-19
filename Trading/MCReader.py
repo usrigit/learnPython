@@ -6,7 +6,6 @@ from commons import Constants as c
 from commons import logger
 import pandas as pd
 
-
 logger.init("MC Reader", c.INFO)
 log = logging.getLogger("MC Reader")
 
@@ -22,7 +21,7 @@ def get_shares_details(stock_url, thread_count):
     # Get the shares from money control
     shares = get_shrs_from_mnctl(stock_url)
     log.info("Total number of shares returned = {}".format(len(shares)))
-    sub_shares = {k: shares[k] for k in list(shares)[:3]}
+    sub_shares = {k: shares[k] for k in list(shares)[:100]}
 
     if sub_shares and len(sub_shares) > 0:
         # put into Queue
@@ -53,7 +52,6 @@ def get_shares_details(stock_url, thread_count):
     sub_groups = df.groupby("CATEGORY")
     for name, group in sub_groups:
         print(name)
-        group.s
         print(group)
     sorted_df = df.sort_values(by="P/E", kind="mergesort")
     print(sorted_df)
