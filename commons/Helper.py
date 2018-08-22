@@ -38,7 +38,7 @@ def upd_dic_with_sub_list(p_key, val, p_dic):
 
 def parse_url(url):
     # This will fetch the content of the URL
-    res = requests.get(url)
+    res = requests.get(url, timeout=5)
     # This will raise status if any error occurs
     if not res.raise_for_status():
         return BeautifulSoup(res.text, "html.parser")

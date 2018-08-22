@@ -5,6 +5,7 @@ from commons import Helper as h
 from commons import Constants as c
 from commons import logger
 import pandas as pd
+import commons, os
 
 logger.init("MC Reader", c.INFO)
 log = logging.getLogger("MC Reader")
@@ -21,11 +22,10 @@ def get_shares_details(stock_url, thread_count):
     # Get the shares from money control
     shares = get_shrs_from_mnctl(stock_url)
     log.info("Total number of shares returned = {}".format(len(shares)))
-    sub_shares = {k: shares[k] for k in list(shares)[:100]}
-
-    if sub_shares and len(sub_shares) > 0:
+    # shares = {k: shares[k] for k in list(shares)[:50]}
+    if shares and len(shares) > 0:
         # put into Queue
-        url_que = get_shares_category(sub_shares)
+        url_que = get_shares_category(shares)
         log.info("Shares added to Queue to process...")
 
     for i in range(thread_count):
@@ -40,21 +40,30 @@ def get_shares_details(stock_url, thread_count):
     while not failed_que.empty():
         log.warning("Failed URL details = {}".format(failed_que.get()))
 
-    final_data = []
+    final_data = {}
     while not results_que.empty():
-        final_data.append(results_que.get())
-        # tmp_dict = results_que.get()
-        # key = tmp_dict.get("CATEGORY")
-        # h.upd_dic_with_sub_list(key, tmp_dict, final_data)
+        # final_data.append(results_que.get())
+        tmp_dict = results_que.get()
+        key = tmp_dict.get("CATEGORY")
+        h.upd_dic_with_sub_list(key, tmp_dict, final_data)
     pd.set_option('display.max_columns', 15)
-    df = pd.DataFrame(final_data)
-    df = df.set_index("NAME")
-    sub_groups = df.groupby("CATEGORY")
-    for name, group in sub_groups:
-        print(name)
-        print(group)
-    sorted_df = df.sort_values(by="P/E", kind="mergesort")
-    print(sorted_df)
+    for category in final_data:
+        cat_up = category.upper()
+        print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
+        df = pd.DataFrame(final_data[category])
+        df = df.set_index("NAME")
+        # Slice it as needed
+        sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
+                               'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
+        sliced_df = sliced_df.apply(pd.to_numeric, errors='ignore')
+        sorted_df = sliced_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
+        writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
+                                     engine='xlsxwriter')
+        sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
+        writer_orig.save()
+
+        # Sort by  P/E
+
     print("Execution time = {0:.5f}".format(time.time() - start))
 
 
@@ -102,7 +111,7 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                         if __tag_name and __tag_value:
                             comp_details[__tag_name] = __tag_value
                             __tag_name, __tag_value = None, None
-                print("COMP DETAILS =", comp_details)
+                # print("COMP DETAILS =", comp_details)
 
         except Exception as err:
             log.err("mny_ctr_shr_frm_url ERROR = ", str(err))

@@ -54,12 +54,13 @@ def get_shrs_from_mnctl(url):
         df = df.set_index("IPO Name")
         # sliced_df = df.loc[:, ["Date", "Issue", "Listing Open", "Listing Clos", "Listing", "CMP", "Current"]]
         sliced_df = df.loc[:, ["Date", "Issue", "Listing", "CMP", "Current"]]
-        sliced_df["Current"] = sliced_df["Current"].astype(float)
-        sorted_df = sliced_df.sort_values(by='Current', ascending=False)
+        sliced_df = sliced_df.apply(pd.to_numeric, errors='ignore')
+        sliced_df['Date'] = sliced_df['Date'].astype('datetime64[ns]')
+        sorted_df = sliced_df.sort_values(by=['Current', 'Date'], ascending= [False, False])
         sub_df = sorted_df.query('Current > 0')
         writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), 'IOP_Listings.xlsx'),
                                      engine='xlsxwriter')
-        sub_df.to_excel(writer_orig, index=False, sheet_name='report')
+        sub_df.to_excel(writer_orig, index=True, sheet_name='report')
         writer_orig.save()
         print("Writing completed")
 
