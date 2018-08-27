@@ -28,14 +28,19 @@ def get_shares_details(stock_url, process_cnt):
 
     failed_que = multi.Queue()
     start = time.time()
+    all_pages = []
     # Get the shares from money control
-    page_list = get_list_of_share_links(stock_url)
+    for one in range(97, 123):
+        url = stock_url + "/" + chr(one).upper()
+        page_list = get_list_of_share_links(url)
+        all_pages.extend(page_list)
+    print("All pages = ", all_pages)
     # page_list = page_list[:50]
     # cpdus = multi.cpu_count()
     cpdus = process_cnt
     print("Total Process count = {}".format(cpdus))
-    print("Total URL count = {}".format(len(page_list)))
-    page_bins = chunks(cpdus, page_list)
+    print("Total URL count = {}".format(len(all_pages)))
+    page_bins = chunks(cpdus, all_pages)
 
     for cpdu in range(cpdus):
         recv_end, send_end = multi.Pipe(False)
@@ -69,8 +74,9 @@ def get_shares_details(stock_url, process_cnt):
         # Slice it as needed
         sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
                                'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
-        sliced_df = sliced_df.apply(pd.to_numeric, errors='ignore')
-        sorted_df = sliced_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
+        filtered_df = sliced_df[sliced_df['EPS (TTM)'] != '-']
+        filtered_df = filtered_df.apply(pd.to_numeric, errors='ignore')
+        sorted_df = filtered_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
         writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
                                      engine='xlsxwriter')
         sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
@@ -148,6 +154,7 @@ def process_page(data_array, send_end, failed_que):
 
                     
 if __name__ == "__main__":
+
     get_shares_details(c.URL, c.THREAD_COUNT)
                     
 

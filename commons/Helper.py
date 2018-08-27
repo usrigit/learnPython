@@ -36,6 +36,40 @@ def upd_dic_with_sub_list(p_key, val, p_dic):
         p_dic[p_key] = temp_val
 
 
+def get_eps_data(url):
+    try:
+        bs = parse_url(url)
+        if bs:
+            all_scripts = bs.find_all('script')
+            ele_arr = {}
+            for number, script in enumerate(all_scripts):
+                if 'netProfitEPSChart =' in script.text:
+                    start = script.text.find("data")
+                    end = script.text.find("netProfitEPSChart =")
+                    data_script = script.text[start:end]
+                    list_arr = data_script.split("data")[2].split(",")
+                    year = 2013
+                    i = 0
+                    for ele in list_arr:
+                        if '"y":' in ele:
+                            ele_arr[year + i] = extract_nbr(ele)
+                            i += 1
+    except Exception as err:
+        print(err)
+
+    return ele_arr
+
+
+def extract_nbr(input_str):
+    if input_str is None or input_str == '':
+        return 0
+    out_number = ''
+    for ele in input_str:
+        if ele.isdigit() or ele == ".":
+            out_number += ele
+    return float(out_number.strip("."))
+
+
 def parse_url(url):
     # This will fetch the content of the URL
     res = requests.get(url, timeout=5)
