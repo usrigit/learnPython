@@ -30,14 +30,14 @@ def get_shares_details(stock_url, process_cnt):
     start = time.time()
     all_pages = []
     # Get the shares from money control
-    for one in range(97, 123):
-        url = stock_url + "/" + chr(one).upper()
-        page_list = get_list_of_share_links(url)
-        all_pages.extend(page_list)
-    print("All pages = ", all_pages)
-    # page_list = page_list[:50]
+    # for one in range(97, 123):
+    #     url = stock_url + "/" + chr(one).upper()
+    #     page_list = get_list_of_share_links(url)
+    #     all_pages.extend(page_list)
+    # all_pages = all_pages[:1]
+    all_pages = ['A & M Febcon###http://www.moneycontrol.com/india/stockpricequote/miscellaneous/amfebcon/F03']
     # cpdus = multi.cpu_count()
-    cpdus = process_cnt
+    cpdus = 1
     print("Total Process count = {}".format(cpdus))
     print("Total URL count = {}".format(len(all_pages)))
     page_bins = chunks(cpdus, all_pages)
@@ -101,7 +101,7 @@ def get_shrs_from_mnctl(url):
                 for link in row.findAll("a"):
                     shares[link.get("title")] = link.get('href')
     except Exception as err:
-        log.exception("ERROR in get_shr_from_mnctl = ", str(err))
+        log.exception("ERROR in get_shr_from_mnctl = {}".format(err))
     return shares
 
 
@@ -115,6 +115,29 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
             comp_details['CATEGORY'] = key
         bs = h.parse_url(cmp_url)
         if bs:
+            base_data = bs.find('div', {'class': 'FL gry10'})
+            bs_txt_arr = base_data.text.split("|")
+            bse_code = bs_txt_arr[0].split(":")[1]
+            nse_code = bs_txt_arr[1].split(":")[1]
+            isin_code = bs_txt_arr[2].split(":")[1]
+            sector = bs_txt_arr[3].split(":")[1]
+
+            bse_data = bs.find('div', {'id': 'content_bse'}).find('div', {'class': 'brdb PB5'}).findAll('div')
+            bse_dt = bse_data[3].text
+            bse_st_price = bse_data[4].text
+            print ("bse_data[6].text = ", bse_data[6].text)
+            bse_st_vol = h.alpnum_to_num(bse_data[6].text.strip())
+            print("bse dt", bse_dt)
+            print("bse_st_price", bse_st_price)
+            print("bse_st_vol", bse_st_vol)
+
+            bse_data = bs.find('div', {'id': 'content_bse'}).find('div', {'class': 'brdb PA5'}).findAll('div')
+            for ele in bse_data:
+                print("ELE = ", ele)
+
+
+
+
             std_data = bs.find('div', {'id': 'mktdet_1'})
             for each_div in std_data.findAll('div', attrs={'class': 'PA7 brdb'}):
                 sub_div = each_div.descendants
@@ -127,7 +150,7 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                     if __tag_name and __tag_value:
                         comp_details[__tag_name] = __tag_value
                         __tag_name, __tag_value = None, None
-            # print("COMP DETAILS =", comp_details)
+            print("COMP DETAILS =", comp_details)
 
     except Exception as err:
         # log.error("mny_ctr_shr_frm_url ERROR = ", str(err))
@@ -137,8 +160,12 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
 
 def process_page(data_array, send_end, failed_que):
     results = []
+    print("DATA ARRAY = ", data_array)
     for data in data_array:
+        print("DATA = ", data)
         cmp_name, cmp_url = data.split("###")[0], data.split("###")[1]
+        cmp_name = "Yes bank"
+        cmp_url = "https://www.moneycontrol.com/india/stockpricequote/finance-general/akcapitalservices/AKC01"
         try:
             result = mny_ctr_shr_frm_url(cmp_name, cmp_url)
             if result:

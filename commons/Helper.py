@@ -5,7 +5,9 @@ This file contains all utility functions which are common for all modules
 import functools
 import traceback
 import requests
+import re, time, datetime
 from bs4 import BeautifulSoup
+from collections import OrderedDict
 
 
 def catch_exceptions(job_func):
@@ -47,17 +49,23 @@ def get_eps_data(url):
                     start = script.text.find("data")
                     end = script.text.find("netProfitEPSChart =")
                     data_script = script.text[start:end]
-                    list_arr = data_script.split("data")[2].split(",")
-                    year = 2013
-                    i = 0
-                    for ele in list_arr:
-                        if '"y":' in ele:
-                            ele_arr[year + i] = extract_nbr(ele)
-                            i += 1
+                    # print("DATA script = ", data_script)
+                    data = data_script.split("data")[2]
+                    data = data[3:]
+                    for ele in data.split(","):
+                        x = ele.split(":")[0]
+                        y = ele.split(":")[1]
+                        if '"x"' in x:
+                            epoch_time = int(trim_special_chr(y))
+                            eps_year = datetime.datetime.fromtimestamp(epoch_time / 1000).strftime('%Y-%m-%d %H:%M:%S')[
+                                       :4]
+                        if '"y"' in x:
+                            ele_arr[eps_year] = float(trim_special_chr(y))
+            return ele_arr
     except Exception as err:
-        print(err)
+        print("ERROR in get_eps_data", str(err))
 
-    return ele_arr
+    return None
 
 
 def extract_nbr(input_str):
@@ -70,11 +78,46 @@ def extract_nbr(input_str):
     return float(out_number.strip("."))
 
 
+def trim_special_chr(input_str):
+    input_str = re.sub(r"[()\"#/@;:<>{}[\]`+=~|!?,]", "", input_str)
+    return input_str
+
+
+def alpnum_to_num(str):
+    try:
+        if len(str) > 0:
+            number = ''.join(filter(lambda x: x.isdigit(), str))
+        else:
+            number = 0
+    except Exception as e:
+        number = 0
+    return number
+
+
 def parse_url(url):
-    # This will fetch the content of the URL
-    res = requests.get(url, timeout=5)
-    # This will raise status if any error occurs
-    if not res.raise_for_status():
-        return BeautifulSoup(res.text, "html.parser")
-    else:
-        return None
+    try:
+        # This will fetch the content of the URL
+        res = requests.get(url, timeout=5)
+        # This will raise status if any error occurs
+        if not res.raise_for_status():
+            return BeautifulSoup(res.text, "html.parser")
+        else:
+            return None
+    except Exception as err:
+        print("Error while parsing {} url is {} ".format(url, err))
+        raise err
+
+
+def merge_dict_with_sub_dict(dict1, dict2):
+    final_dict = {}
+    for k in set().union(dict1, dict2):
+        val = OrderedDict()
+        sub_d1 = dict1.get(k)
+        sub_d2 = dict2.get(k)
+
+        if sub_d1:
+            val.update(sub_d1)
+        if sub_d2:
+            val.update(sub_d2)
+        final_dict.update({k: val})
+    return final_dict
