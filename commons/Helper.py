@@ -86,12 +86,11 @@ def trim_special_chr(input_str):
 def alpnum_to_num(str):
     try:
         if len(str) > 0:
-            number = ''.join(filter(lambda x: x.isdigit(), str))
-        else:
-            number = 0
+            return ''.join(filter(lambda x: x.isdigit(), str))
+
     except Exception as e:
-        number = 0
-    return number
+        pass
+    return 0
 
 
 def parse_url(url):
