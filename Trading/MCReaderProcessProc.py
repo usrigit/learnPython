@@ -21,23 +21,30 @@ def get_list_of_share_links(stock_url):
     return ["###".join([title, link]) for title, link in shares.items() if title and link]
 
 
+def define_mc_ratio_link(url):
+    ele_list = url.split("/")
+    code = ele_list[len(ele_list) - 1]
+    name = ele_list[len(ele_list) - 2]
+    return "https://www.moneycontrol.com/financials/" + name + "/ratiosVI/" + code + "#" + code
+
+
 def get_shares_details(stock_url, process_cnt):
     # Variables declaration
     jobs = []
     spipe_list = []
+    all_pages = []
 
     failed_que = multi.Queue()
     start = time.time()
-    all_pages = []
+
     # Get the shares from money control
-    # for one in range(97, 123):
-    #     url = stock_url + "/" + chr(one).upper()
-    #     page_list = get_list_of_share_links(url)
-    #     all_pages.extend(page_list)
-    # all_pages = all_pages[:1]
-    all_pages = ['Yes Bank###https://www.moneycontrol.com/india/stockpricequote/textiles-spinning-cotton-blended/aptyarns/APT01']
-    # cpdus = multi.cpu_count()
-    cpdus = 1
+    for one in range(97, 123):
+        url = stock_url + "/" + chr(one).upper()
+        page_list = get_list_of_share_links(url)
+        all_pages.extend(page_list)
+    all_pages = all_pages[:50]
+    # all_pages = ['Yes Bank###https://www.moneycontrol.com/india/stockpricequote/miscellaneous/timexgroupindia/TGI']
+    cpdus = multi.cpu_count()
     print("Total Process count = {}".format(cpdus))
     print("Total URL count = {}".format(len(all_pages)))
     page_bins = chunks(cpdus, all_pages)
@@ -45,12 +52,23 @@ def get_shares_details(stock_url, process_cnt):
     for cpdu in range(cpdus):
         recv_end, send_end = multi.Pipe(False)
         worker = multi.Process(target=process_page, args=(page_bins[cpdu], send_end, failed_que,))
+        worker.daemon = True
         jobs.append(worker)
         spipe_list.append(recv_end)
         worker.start()
 
-    for proc in jobs:
-        proc.join()
+    # end_at = time.time() + (5)
+    # while jobs:
+    #     job = jobs.pop()
+    #     delta = end_at - time.time()
+    #     if delta > 0:
+    #         job.join(timeout=delta)
+    #     job.terminate()
+    #     job.join()
+    for job in jobs:
+        job.join()
+
+    print("All jobs completed......")
 
     result_list = [x.recv() for x in spipe_list]
 
@@ -58,12 +76,16 @@ def get_shares_details(stock_url, process_cnt):
         print("Failed URL = ", failed_que.get())
     print("Final results list = ", len(result_list))
     final_data = {}
+    ratio_links = []
     for results in result_list:
         print("size of the results array from result_list = ", len(results))
         for tmp_dict in results:
             key = tmp_dict.get("CATEGORY")
+            link = tmp_dict.get("URL")
+            ratio_links.append(define_mc_ratio_link(link))
             h.upd_dic_with_sub_list(key, tmp_dict, final_data)
     print("Size of the FINAL dictionary = ", len(final_data))
+    print("Size of the RATIO array = ", len(ratio_links))
     pd.set_option('display.max_columns', 15)
 
     for category in final_data:
@@ -105,58 +127,73 @@ def get_shrs_from_mnctl(url):
     return shares
 
 
-def get_daily_st_details(bs, id):
-    bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}).findAll('div')
-    bse_dt = bse_data[3].text
-    bse_st_price = bse_data[4].text
-    bse_st_vol = h.alpnum_to_num(bse_data[6].text.strip().split("\n")[0])
-    print("bse dt", bse_dt)
-    print("bse_st_price", bse_st_price)
-    print("bse_st_vol", bse_st_vol)
+def mc_get_perf_stk_details(bs):
+    comp_details = {}
+    try:
+        std_data = bs.find('div', {'id': 'mktdet_1'})
+        for each_div in std_data.findAll('div', attrs={'class': 'PA7 brdb'}):
+            sub_div = each_div.descendants
+            __tag_name, __tag_value = None, None
+            for cd in sub_div:
+                if cd.name == 'div' and cd.get('class', '') == ['FL', 'gL_10', 'UC']:
+                    __tag_name = cd.text
+                if cd.name == 'div' and cd.get('class', '') == ['FR', 'gD_12']:
+                    __tag_value = cd.text
+                if __tag_name and __tag_value:
+                    comp_details[__tag_name] = __tag_value
+                    __tag_name, __tag_value = None, None
+        # print("COMP DETAILS =", comp_details)
 
-    bse_data = bs.find('div', {'id': 'content_bse'}).find('div', {'class': 'brdb PA5'}).findAll('div')
-    stk_prc = 0
-    prev_close = 0
-    open_price = 0
-    for ele in bse_data:
-        if ele.get("class") == ['gD_12', 'PB3']:
-            if stk_prc == 0:
-                prev_close = ele.text.strip()
-            elif stk_prc == 1:
-                open_price = ele.text.strip()
-            stk_prc += 1
-    print("prev_close", prev_close)
-    print("open_price", open_price)
-    bse_data = bs.find('div', {'id': 'content_bse'}).find('div', {'class': "PT10 clearfix"}).findAll('div')
-    stk_p = 0
-    tl_price = 0
-    th_price = 0
-    wl_price = 0
-    wh_price = 0
-    for ele in bse_data:
-        if ele.get('class') == ["PB3", "gD_11"]:
-            ele_li = ele.text.strip().split("\n")
-            if stk_p == 0:
-                tl_price = ele_li[1]
-                th_price = ele_li[3]
-            elif stk_p == 1:
-                wl_price = ele_li[1]
-                wh_price = ele_li[3]
-            stk_p += 1
-    print("tl_price", tl_price)
-    print("th_price", th_price)
-    print("wl_price", wl_price)
-    print("wh_price", wh_price)
+    except Exception as err:
+        print("While parsing PERF DETAILS {}".format(err))
+    return comp_details
+
+
+def mc_get_day_stk_details(bs, id):
+    data_dict = {}
+    try:
+        if bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}):
+            bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}).findAll('div')
+            bse_dt = bse_data[3].text
+            bse_st_price = bse_data[4].text
+            bse_st_vol = h.alpnum_to_num(bse_data[6].text.strip().split("\n")[0])
+            data_dict["STK_DATE"] = bse_dt
+            data_dict["STK_CUR_RATE"] = bse_st_price
+            data_dict["STK_TRD_VOL"] = bse_st_vol
+
+        if bs.find('div', {'id': id}).find('div', {'class': 'brdb PA5'}):
+            bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PA5'}).findAll('div')
+            stk_prc = 0
+            for ele in bse_data:
+                if ele.get("class") == ['gD_12', 'PB3']:
+                    if stk_prc == 0:
+                        data_dict["STK_PREV_RATE"] = ele.text.strip()
+                    elif stk_prc == 1:
+                        data_dict["STK_OPEN_RATE"] = ele.text.strip()
+                    stk_prc += 1
+
+        if bs.find('div', {'id': id}).find('div', {'class': "PT10 clearfix"}):
+            bse_data = bs.find('div', {'id': id}).find('div', {'class': "PT10 clearfix"}).findAll('div')
+            stk_p = 0
+            for ele in bse_data:
+                if ele.get('class') == ["PB3", "gD_11"]:
+                    ele_li = ele.text.strip().split("\n")
+                    if stk_p == 0:
+                        data_dict["STK_LOW_RATE"] = ele_li[1]
+                        data_dict["STK_HIGH_RATE"] = ele_li[3]
+                    elif stk_p == 1:
+                        data_dict["STK_YLOW_RATE"] = ele_li[1]
+                        data_dict["STK_YHIGH_RATE"] = ele_li[3]
+                    stk_p += 1
+
+    except Exception as err:
+        print("While prasing for day stocks = {}".format(err))
+    return data_dict
 
 
 def mny_ctr_shr_frm_url(cmp_name, cmp_url):
-    comp_details = {}
     try:
-        comp_details['NAME'] = cmp_name
-        elements = cmp_url.split("/")
-        if len(elements) > 5:
-            key = elements[5]
-            comp_details['CATEGORY'] = key
+
         bs = h.parse_url(cmp_url)
         if bs:
             base_data = bs.find('div', {'class': 'FL gry10'})
@@ -165,40 +202,34 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
             nse_code = bs_txt_arr[1].split(":")[1].strip()
             isin_code = bs_txt_arr[2].split(":")[1].strip()
             sector = bs_txt_arr[3].split(":")[1]
-
-            print("bse_code", bse_code)
-            print("nse_code", nse_code)
-            print("isin_code", isin_code)
+            stk_result = {}
             if nse_code:
-                get_daily_st_details(bs, 'content_nse')
-            elif isin_code:
-                get_daily_st_details(bs, 'content_bse')
-            std_data = bs.find('div', {'id': 'mktdet_1'})
-            for each_div in std_data.findAll('div', attrs={'class': 'PA7 brdb'}):
-                sub_div = each_div.descendants
-                __tag_name, __tag_value = None, None
-                for cd in sub_div:
-                    if cd.name == 'div' and cd.get('class', '') == ['FL', 'gL_10', 'UC']:
-                        __tag_name = cd.text
-                    if cd.name == 'div' and cd.get('class', '') == ['FR', 'gD_12']:
-                        __tag_value = cd.text
-                    if __tag_name and __tag_value:
-                        comp_details[__tag_name] = __tag_value
-                        __tag_name, __tag_value = None, None
-            print("COMP DETAILS =", comp_details)
+                stk_result = mc_get_day_stk_details(bs, 'content_nse')
+                # print("RESULT in NSE = ", stk_result)
+            if not stk_result and isin_code:
+                stk_result = mc_get_day_stk_details(bs, 'content_bse')
+                # print("RESULT in BSE  = ", stk_result)
+            if not stk_result:
+                print("{} is not listed in NSE/BSE...".format(cmp_name))
+            else:
+                comp_details = mc_get_perf_stk_details(bs)
+                comp_details['NAME'] = cmp_name
+                comp_details['CATEGORY'] = sector
+                comp_details['NSE_CODE'] = nse_code
+                comp_details['URL'] = cmp_url
+                comp_details.update(stk_result)
 
     except Exception as err:
-        # log.error("mny_ctr_shr_frm_url ERROR = ", str(err))
         raise err
     return comp_details
 
 
 def process_page(data_array, send_end, failed_que):
     results = []
-    print("DATA ARRAY = ", data_array)
+    print("Size of the data array from current process {} is {} ".format(multi.current_process().name, len(data_array)))
     for data in data_array:
-        print("DATA = ", data)
         cmp_name, cmp_url = data.split("###")[0], data.split("###")[1]
+        print("URL = {} processed by {} ".format(cmp_url, multi.current_process().name))
         try:
             result = mny_ctr_shr_frm_url(cmp_name, cmp_url)
             if result:
@@ -209,14 +240,9 @@ def process_page(data_array, send_end, failed_que):
         except Exception as err:
             failed_que.put(data)
     # After all data completed then send
-    print("len of the results list = ", len(results))
+    print("Sending results {} to Main process from {}".format(len(results), multi.current_process().name))
     send_end.send(results)
 
-                    
+
 if __name__ == "__main__":
-
     get_shares_details(c.URL, c.THREAD_COUNT)
-                    
-
-                    
-                    
