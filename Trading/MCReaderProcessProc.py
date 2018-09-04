@@ -1,4 +1,4 @@
-import time
+import time, traceback
 import multiprocessing as multi, logging
 from commons import Helper as h
 from commons import Constants as c
@@ -42,9 +42,9 @@ def get_shares_details(stock_url, process_cnt):
         url = stock_url + "/" + chr(one).upper()
         page_list = get_list_of_share_links(url)
         all_pages.extend(page_list)
-    all_pages = all_pages[:50]
-    # all_pages = ['Yes Bank###https://www.moneycontrol.com/india/stockpricequote/miscellaneous/timexgroupindia/TGI']
-    cpdus = multi.cpu_count()
+    # all_pages = all_pages[:50]
+    # all_pages = ['Yes Bank###http://www.moneycontrol.com/india/stockpricequote/miscellaneous/amfebcon/F03']
+    cpdus = process_cnt
     print("Total Process count = {}".format(cpdus))
     print("Total URL count = {}".format(len(all_pages)))
     page_bins = chunks(cpdus, all_pages)
@@ -74,7 +74,6 @@ def get_shares_details(stock_url, process_cnt):
 
     while not failed_que.empty():
         print("Failed URL = ", failed_que.get())
-    print("Final results list = ", len(result_list))
     final_data = {}
     ratio_links = []
     for results in result_list:
@@ -192,34 +191,36 @@ def mc_get_day_stk_details(bs, id):
 
 
 def mny_ctr_shr_frm_url(cmp_name, cmp_url):
+    comp_details = {}
     try:
-
         bs = h.parse_url(cmp_url)
         if bs:
             base_data = bs.find('div', {'class': 'FL gry10'})
-            bs_txt_arr = base_data.text.split("|")
-            bse_code = bs_txt_arr[0].split(":")[1]
-            nse_code = bs_txt_arr[1].split(":")[1].strip()
-            isin_code = bs_txt_arr[2].split(":")[1].strip()
-            sector = bs_txt_arr[3].split(":")[1]
-            stk_result = {}
-            if nse_code:
-                stk_result = mc_get_day_stk_details(bs, 'content_nse')
-                # print("RESULT in NSE = ", stk_result)
-            if not stk_result and isin_code:
-                stk_result = mc_get_day_stk_details(bs, 'content_bse')
-                # print("RESULT in BSE  = ", stk_result)
-            if not stk_result:
-                print("{} is not listed in NSE/BSE...".format(cmp_name))
-            else:
-                comp_details = mc_get_perf_stk_details(bs)
-                comp_details['NAME'] = cmp_name
-                comp_details['CATEGORY'] = sector
-                comp_details['NSE_CODE'] = nse_code
-                comp_details['URL'] = cmp_url
-                comp_details.update(stk_result)
+            if base_data:
+                bs_txt_arr = base_data.text.split("|")
+                bse_code = bs_txt_arr[0].split(":")[1]
+                nse_code = bs_txt_arr[1].split(":")[1].strip()
+                isin_code = bs_txt_arr[2].split(":")[1].strip()
+                sector = bs_txt_arr[3].split(":")[1]
+                stk_result = {}
+                if nse_code:
+                    stk_result = mc_get_day_stk_details(bs, 'content_nse')
+                    # print("RESULT in NSE = ", stk_result)
+                if not stk_result and isin_code:
+                    stk_result = mc_get_day_stk_details(bs, 'content_bse')
+                    # print("RESULT in BSE  = ", stk_result)
+                if not stk_result:
+                    print("{} is not listed in NSE/BSE...by process {}".format(cmp_name, multi.current_process().name))
+                else:
+                    comp_details = mc_get_perf_stk_details(bs)
+                    comp_details['NAME'] = cmp_name
+                    comp_details['CATEGORY'] = sector
+                    comp_details['NSE_CODE'] = nse_code
+                    comp_details['URL'] = cmp_url
+                    comp_details.update(stk_result)
 
     except Exception as err:
+        print("CMP URL", cmp_url)
         raise err
     return comp_details
 
@@ -233,16 +234,17 @@ def process_page(data_array, send_end, failed_que):
         try:
             result = mny_ctr_shr_frm_url(cmp_name, cmp_url)
             if result:
-                print("Result = ", result)
+                print("{} process output Result = {}".format(multi.current_process().name, result.get("NAME")))
                 results.append(result)
             else:
-                failed_que.put(data)
+                print("Parsing failed url = ".format(cmp_url))
         except Exception as err:
+            print("Failed exception = ", str(err))
             failed_que.put(data)
     # After all data completed then send
     print("Sending results {} to Main process from {}".format(len(results), multi.current_process().name))
     send_end.send(results)
-
+    print("sent results {} to Main process from {}".format(len(results), multi.current_process().name))
 
 if __name__ == "__main__":
     get_shares_details(c.URL, c.THREAD_COUNT)
