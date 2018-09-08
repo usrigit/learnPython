@@ -42,9 +42,9 @@ def get_shares_details(stock_url, process_cnt):
         url = stock_url + "/" + chr(one).upper()
         page_list = get_list_of_share_links(url)
         all_pages.extend(page_list)
-    # all_pages = all_pages[:50]
+    all_pages = all_pages[:10]
     # all_pages = ['Yes Bank###http://www.moneycontrol.com/india/stockpricequote/miscellaneous/amfebcon/F03']
-    cpdus = process_cnt
+    cpdus = multi.cpu_count()  # process_cnt
     print("Total Process count = {}".format(cpdus))
     print("Total URL count = {}".format(len(all_pages)))
     page_bins = chunks(cpdus, all_pages)
@@ -66,7 +66,7 @@ def get_shares_details(stock_url, process_cnt):
     #     job.terminate()
     #     job.join()
     for job in jobs:
-        job.join()
+        job.join(timeout=10)
 
     print("All jobs completed......")
 
@@ -209,8 +209,6 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                 if not stk_result and isin_code:
                     stk_result = mc_get_day_stk_details(bs, 'content_bse')
                     # print("RESULT in BSE  = ", stk_result)
-                if not stk_result:
-                    print("{} is not listed in NSE/BSE...by process {}".format(cmp_name, multi.current_process().name))
                 else:
                     comp_details = mc_get_perf_stk_details(bs)
                     comp_details['NAME'] = cmp_name
@@ -221,7 +219,7 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
 
     except Exception as err:
         print("CMP URL", cmp_url)
-        raise err
+        # raise err
     return comp_details
 
 
@@ -237,14 +235,15 @@ def process_page(data_array, send_end, failed_que):
                 print("{} process output Result = {}".format(multi.current_process().name, result.get("NAME")))
                 results.append(result)
             else:
-                print("Parsing failed url = ".format(cmp_url))
+                print("{} Parsing failed url {}= ".format(multi.current_process().name, cmp_url))
         except Exception as err:
             print("Failed exception = ", str(err))
-            failed_que.put(data)
+            # failed_que.put(data)
     # After all data completed then send
     print("Sending results {} to Main process from {}".format(len(results), multi.current_process().name))
+    print("Error results {} to Main process from {}".format(failed_que.qsize(), multi.current_process().name))
     send_end.send(results)
-    print("sent results {} to Main process from {}".format(len(results), multi.current_process().name))
+
 
 if __name__ == "__main__":
     get_shares_details(c.URL, c.THREAD_COUNT)

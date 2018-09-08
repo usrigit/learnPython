@@ -1,4 +1,9 @@
 import commons.Helper as h
+import pandas as pd
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from pandas import Series
+from psycopg2.extras import execute_batch
 
 dict1 = {'key1': [1, 2, 3], 'key2': [11, 21, 31]}
 dict2 = {'key1': [4, 5], 'key2': [41, 51]}
@@ -24,6 +29,72 @@ print("Final dict = ", final_dict)
 
 print("Valu = ", ''.join(filter(lambda x: x.isdigit(), "VOLUME  6,438")))
 
+
+def get_connection():
+    conn = None
+    cursor = None
+    try:
+        conn = psycopg2.connect(database="trading",
+                                user="postgres",
+                                password="postgres")
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+
+    except psycopg2.DatabaseError as e:
+        print("error creating database: %s", e)
+    return cursor, conn
+
+
+def fetch_data(cursor, sql):
+    try:
+        cursor.execute(sql)
+        fetch = cursor.fetchall()
+        return fetch
+    except Exception as err:
+        print("while fetching data from table: %s", err)
+
+
+query = "INSERT INTO STK_PERF_HISTORY (NSE_CODE, EPS, BOOK_VAL, DIVIDEND, RET_ON_EQ, " \
+        "PRC_TO_BOOK, PRC_TO_SALE, CURR_RATIO, DEBT_EQUITY, STK_YEAR) " \
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+
+
+def load_data(conn, cursor, sql, parameters):
+    try:
+        cursor.execute(sql, parameters)
+        conn.commit()
+    except Exception as err:
+        print("while loading data to table: %s", err)
+
+
+def close_connection(conn, cursor):
+    try:
+        cursor.close()
+        if conn is not None:
+            conn.close()
+    except Exception as err:
+        print("Error while closing the connection: %s", err)
+
+
+def create():
+    """If not created, create a database with the name specified in
+       the constructor"""
+    conn = None
+    try:
+        conn = psycopg2.connect(database="trading",
+                                user="postgres",
+                                password="postgres")
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        cursor.execute("SELECT BOOK_VAL FROM STK_PERF_HISTORY")
+        fetch = cursor.fetchall()
+        print(fetch)
+    except psycopg2.DatabaseError as e:
+        print("error creating database: %s", e)
+    finally:
+        conn.close()
+
+
 ratio_con = {
     'Basic EPS (Rs.)': "EPS",
     'Book Value [Excl. Reval Reserve]/Share (Rs.)': "BOOK_VAL",
@@ -36,22 +107,23 @@ ratio_con = {
 }
 
 ratio_elements = {
-    'YEAR': [],
+    'STK_YEAR': [],
     'EPS': [],
-    'BOOL_VAL': [],
+    'BOOK_VAL': [],
     'DIVIDEND': [],
     'RET_ON_EQ': [],
     'PRC_TO_BOOK': [],
     'PRC_TO_SALE': [],
-    'CURR_RATIO': [],
-    'DEBT_EQUITY': []
+    'CURR_RATIO': [0.0, 0.0, 0.0, 0.0, 0.0],
+    'DEBT_EQUITY': [0.0, 0.0, 0.0, 0.0, 0.0]
 }
 stock_ratio = {}
 url = "https://www.moneycontrol.com/financials/yesbank/ratiosVI/YB#YB"
 bs = h.parse_url(url)
 if bs:
     std_data = bs.find('div', {'class': 'PB10'}).find('div', {'class': 'FL gry10'})
-    print(std_data.text.split("|")[1])
+    nse_code = (std_data.text.split("|")[1]).split(":")[1].strip()
+    print("NSE_CODE", nse_code)
     data = [
         [
             [td.string.strip() for td in tr.find_all('td') if td.string]
@@ -60,13 +132,44 @@ if bs:
         for table in bs.find_all("table", {"class": "table4"})[2:]
     ]
     ele_list = data[0]
-    stock_ratio['YEAR'] = data[0][0]
+    ratio_elements['STK_YEAR'] = data[0][0]
     i = 2
     while i < len(ele_list) - 4:
         arr = ele_list[i]
         if len(arr) > 5:
             key = ratio_con.get(arr[0])
             val = arr[1:]
-            if key: stock_ratio[key] = val
+            if key: ratio_elements[key] = val
         i += 1
-    print("STK RATIO = ", stock_ratio)
+    print("STK RATIO = ", ratio_elements)
+    # Set pandas options
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.expand_frame_repr', False)
+    pd.set_option('max_colwidth', 0)
+    df = pd.DataFrame(ratio_elements)
+    df = df.apply(pd.to_numeric, errors='ignore')
+    df = df.assign(NSE_CODE=Series(nse_code, index=df.index))
+
+    if len(df) > 0:
+        df_columns = list(df)
+        table = "STK_PERF_HISTORY"
+        columns = ",".join(df_columns)
+        print("Columns = ", columns)
+        values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+        print("Values = ", values)
+        print(df.values)
+        # create INSERT INTO table (columns) VALUES('%s',...)
+        insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+        print(insert_stmt)
+        conn = psycopg2.connect(database="trading",
+                                user="postgres",
+                                password="postgres")
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        execute_batch(cursor, insert_stmt, df.values)
+        conn.commit()
+        cursor.close()
+
+if __name__ == "__main__":
+    # create()
+    pass
