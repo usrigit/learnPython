@@ -5,7 +5,7 @@ This file contains all utility functions which are common for all modules
 import functools
 import traceback
 import requests
-import re, time, datetime
+import re, json, datetime
 from bs4 import BeautifulSoup
 from collections import OrderedDict
 
@@ -120,3 +120,19 @@ def merge_dict_with_sub_dict(dict1, dict2):
             val.update(sub_d2)
         final_dict.update({k: val})
     return final_dict
+
+
+def write_list_to_json_file(filename, data_list):
+    # open output file for writing
+    with open(filename, 'w') as file:
+        json.dump(data_list, file)
+    file.close()
+
+def read_list_from_json_file(filename):
+    output = []
+    # open output file for reading
+    with open(filename, 'r') as file:
+        output = json.load(file)
+    file.close()
+    return output
+

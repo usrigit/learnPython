@@ -5,7 +5,7 @@ from commons import Constants as c
 from commons import logger
 import pandas as pd
 import commons, os, numpy as np
-from queue import Queue
+import json
 
 logger.init("MC Reader Process Proc", c.INFO)
 log = logging.getLogger("MC Reader Process Proc")
@@ -28,27 +28,16 @@ def define_mc_ratio_link(url):
     return "https://www.moneycontrol.com/financials/" + name + "/ratiosVI/" + code + "#" + code
 
 
-def get_shares_details(stock_url, process_cnt):
+def get_shares_details(all_pages, first_time_process):
     # Variables declaration
     jobs = []
     spipe_list = []
-    all_pages = []
-
     failed_que = multi.Queue()
     start = time.time()
-
-    # Get the shares from money control
-    for one in range(97, 123):
-        url = stock_url + "/" + chr(one).upper()
-        page_list = get_list_of_share_links(url)
-        all_pages.extend(page_list)
-    all_pages = all_pages[:10]
-    # all_pages = ['Yes Bank###http://www.moneycontrol.com/india/stockpricequote/miscellaneous/amfebcon/F03']
-    cpdus = multi.cpu_count()  # process_cnt
+    cpdus = multi.cpu_count()
     print("Total Process count = {}".format(cpdus))
     print("Total URL count = {}".format(len(all_pages)))
     page_bins = chunks(cpdus, all_pages)
-
     for cpdu in range(cpdus):
         recv_end, send_end = multi.Pipe(False)
         worker = multi.Process(target=process_page, args=(page_bins[cpdu], send_end, failed_que,))
@@ -67,13 +56,16 @@ def get_shares_details(stock_url, process_cnt):
     #     job.join()
     for job in jobs:
         job.join(timeout=10)
-
     print("All jobs completed......")
 
+    # if first_time_process:
+    #     result_list = [x.recv() for x in spipe_list]
+    #     failed_pages = []
+    #     while not failed_que.empty():
+    #         failed_pages.append(failed_que.get())
+    #     print("Parsing failed page count = {}".format(len(failed_pages)))
+    #     get_shares_details(failed_pages, False)
     result_list = [x.recv() for x in spipe_list]
-
-    while not failed_que.empty():
-        print("Failed URL = ", failed_que.get())
     final_data = {}
     ratio_links = []
     for results in result_list:
@@ -83,8 +75,11 @@ def get_shares_details(stock_url, process_cnt):
             link = tmp_dict.get("URL")
             ratio_links.append(define_mc_ratio_link(link))
             h.upd_dic_with_sub_list(key, tmp_dict, final_data)
-    print("Size of the FINAL dictionary = ", len(final_data))
-    print("Size of the RATIO array = ", len(ratio_links))
+    if ratio_links and len(ratio_links) > 0:
+        print("Size of the RATIO array = ", len(ratio_links))
+        h.write_list_to_json_file(os.path.join(
+            commons.get_prop('base-path', 'output'), "5yrs_stk_ratio.txt"), ratio_links)
+
     pd.set_option('display.max_columns', 15)
 
     for category in final_data:
@@ -205,11 +200,12 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                 stk_result = {}
                 if nse_code:
                     stk_result = mc_get_day_stk_details(bs, 'content_nse')
-                    # print("RESULT in NSE = ", stk_result)
+                    print("RESULT in NSE = ", stk_result)
                 if not stk_result and isin_code:
+                    print("Processing in BSE  = ", stk_result)
                     stk_result = mc_get_day_stk_details(bs, 'content_bse')
                     # print("RESULT in BSE  = ", stk_result)
-                else:
+                if stk_result:
                     comp_details = mc_get_perf_stk_details(bs)
                     comp_details['NAME'] = cmp_name
                     comp_details['CATEGORY'] = sector
@@ -236,14 +232,33 @@ def process_page(data_array, send_end, failed_que):
                 results.append(result)
             else:
                 print("{} Parsing failed url {}= ".format(multi.current_process().name, cmp_url))
+                failed_que.put(data)
         except Exception as err:
             print("Failed exception = ", str(err))
-            # failed_que.put(data)
+            failed_que.put(data)
     # After all data completed then send
     print("Sending results {} to Main process from {}".format(len(results), multi.current_process().name))
     print("Error results {} to Main process from {}".format(failed_que.qsize(), multi.current_process().name))
     send_end.send(results)
 
 
+def get_list_of_shares_mc(stock_url, first_time):
+    """
+    Get the list of shares from money control site
+    :param stock_url:
+    :return: stocks list
+    """
+    all_pages = []
+    if stock_url:
+        # Get the shares from money control
+        for one in range(97, 123):
+            url = stock_url + "/" + chr(one).upper()
+            page_list = get_list_of_share_links(url)
+            all_pages.extend(page_list)
+        all_pages = all_pages[:10]
+        get_shares_details(all_pages, first_time)
+
+
 if __name__ == "__main__":
-    get_shares_details(c.URL, c.THREAD_COUNT)
+    get_list_of_shares_mc(c.URL, True)
+
