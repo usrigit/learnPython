@@ -68,18 +68,21 @@ def get_eps_data(url):
     return None
 
 
-def extract_nbr(input_str):
-    if input_str is None or input_str == '':
-        return 0
+def extract_float(input_str):
+    if input_str is None or input_str == '' or input_str == '-':
+        return 0.0
     out_number = ''
     for ele in input_str:
         if ele.isdigit() or ele == ".":
             out_number += ele
-    return float(out_number.strip("."))
+    if out_number:
+        return float(out_number)
+    else:
+        return 0.0
 
 
 def trim_special_chr(input_str):
-    input_str = re.sub(r"[()\"#/@;:<>{}[\]`+=~|!?,]", "", input_str)
+    input_str = re.sub(r"[()\"#/%-@;:<>{}[\]`+=~|!?,]", "", input_str)
     return input_str
 
 

@@ -173,3 +173,18 @@ if bs:
 if __name__ == "__main__":
     # create()
     pass
+
+        # cat_up = category.upper()
+        # print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
+        # df = pd.DataFrame(final_data[category])
+        # df = df.set_index("NAME")
+        # # Slice it as needed
+        # sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
+        #                        'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
+        # filtered_df = sliced_df[sliced_df['EPS (TTM)'] != '-']
+        # filtered_df = filtered_df.apply(pd.to_numeric, errors='ignore')
+        # sorted_df = filtered_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
+        # writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
+        #                              engine='xlsxwriter')
+        # sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
+        # writer_orig.save()

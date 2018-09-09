@@ -3,9 +3,10 @@ import multiprocessing as multi, logging
 from commons import Helper as h
 from commons import Constants as c
 from commons import logger
-import pandas as pd
 import commons, os, numpy as np
-import json
+from psycopg2.extras import execute_batch
+import pandas as pd
+from dao import PostgreSQLCon as db
 
 logger.init("MC Reader Process Proc", c.INFO)
 log = logging.getLogger("MC Reader Process Proc")
@@ -68,6 +69,7 @@ def get_shares_details(all_pages, first_time_process):
     result_list = [x.recv() for x in spipe_list]
     final_data = {}
     ratio_links = []
+
     for results in result_list:
         print("size of the results array from result_list = ", len(results))
         for tmp_dict in results:
@@ -80,23 +82,27 @@ def get_shares_details(all_pages, first_time_process):
         h.write_list_to_json_file(os.path.join(
             commons.get_prop('base-path', 'output'), "5yrs_stk_ratio.txt"), ratio_links)
 
-    pd.set_option('display.max_columns', 15)
-
+    # Set pandas options
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.expand_frame_repr', False)
+    pd.set_option('max_colwidth', 0)
     for category in final_data:
-        cat_up = category.upper()
-        print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
         df = pd.DataFrame(final_data[category])
-        df = df.set_index("NAME")
-        # Slice it as needed
-        sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
-                               'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
-        filtered_df = sliced_df[sliced_df['EPS (TTM)'] != '-']
-        filtered_df = filtered_df.apply(pd.to_numeric, errors='ignore')
-        sorted_df = filtered_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
-        writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
-                                     engine='xlsxwriter')
-        sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
-        writer_orig.save()
+        if len(df) > 0:
+            df_columns = list(df)
+            table = "STK_DETAILS"
+            columns = ",".join(df_columns)
+            print(df.values)
+            values = "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
+                     "%s, %s, %s, %s, %s, %s, to_date(%s, 'YYYMONDD'), %s, %s, %s);"
+            # create INSERT INTO table (columns) VALUES('%s',...)
+            insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+            print("Count of rows insert into DB = ", len(df.values))
+            curr, con = db.get_connection()
+            execute_batch(curr, insert_stmt, df.values)
+            con.commit()
+            db.close_connection(con, curr)
+
     print("Execution time = {0:.5f}".format(time.time() - start))
 
 
@@ -133,27 +139,35 @@ def mc_get_perf_stk_details(bs):
                     __tag_name = cd.text
                 if cd.name == 'div' and cd.get('class', '') == ['FR', 'gD_12']:
                     __tag_value = cd.text
-                if __tag_name and __tag_value:
+
+                if __tag_name and __tag_value and __tag_name in c.STK_RATIO_CON:
+                    __tag_name = c.STK_RATIO_CON[__tag_name]
+                    if __tag_name not in ['NAME', 'CATEGORY', 'SUB_CATEGORY']:
+                        __tag_value = h.extract_float(__tag_value)
                     comp_details[__tag_name] = __tag_value
                     __tag_name, __tag_value = None, None
         # print("COMP DETAILS =", comp_details)
 
     except Exception as err:
         print("While parsing PERF DETAILS {}".format(err))
+        traceback.print_exc()
     return comp_details
 
 
-def mc_get_day_stk_details(bs, id):
+def mc_get_day_stk_details(bs, id, cmp_url):
     data_dict = {}
     try:
         if bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}):
             bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}).findAll('div')
-            bse_dt = bse_data[3].text
-            bse_st_price = bse_data[4].text
-            bse_st_vol = h.alpnum_to_num(bse_data[6].text.strip().split("\n")[0])
-            data_dict["STK_DATE"] = bse_dt
-            data_dict["STK_CUR_RATE"] = bse_st_price
-            data_dict["STK_TRD_VOL"] = bse_st_vol
+            if bse_data:
+                year = time.strftime("%Y")
+                bse_dt = bse_data[3].text.split(",")[0].strip()
+                if bse_dt:
+                    data_dict["STK_DATE"] = year + ' ' + bse_dt
+                    print("date = {} and dic date = {} and URL= {}".format(bse_dt, data_dict["STK_DATE"], cmp_url))
+                data_dict["CURR_PRICE"] = bse_data[4].text.strip()
+                bse_st_vol = h.alpnum_to_num(bse_data[6].text.strip().split("\n")[0])
+                data_dict["TRADED_VOLUME"] = bse_st_vol
 
         if bs.find('div', {'id': id}).find('div', {'class': 'brdb PA5'}):
             bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PA5'}).findAll('div')
@@ -161,9 +175,9 @@ def mc_get_day_stk_details(bs, id):
             for ele in bse_data:
                 if ele.get("class") == ['gD_12', 'PB3']:
                     if stk_prc == 0:
-                        data_dict["STK_PREV_RATE"] = ele.text.strip()
+                        data_dict["PREV_PRICE"] = ele.text.strip()
                     elif stk_prc == 1:
-                        data_dict["STK_OPEN_RATE"] = ele.text.strip()
+                        data_dict["OPEN_PRICE"] = ele.text.strip()
                     stk_prc += 1
 
         if bs.find('div', {'id': id}).find('div', {'class': "PT10 clearfix"}):
@@ -173,13 +187,14 @@ def mc_get_day_stk_details(bs, id):
                 if ele.get('class') == ["PB3", "gD_11"]:
                     ele_li = ele.text.strip().split("\n")
                     if stk_p == 0:
-                        data_dict["STK_LOW_RATE"] = ele_li[1]
-                        data_dict["STK_HIGH_RATE"] = ele_li[3]
+                        data_dict["LOW_PRICE"] = ele_li[1]
+                        data_dict["HIGH_PRICE"] = ele_li[3]
                     elif stk_p == 1:
-                        data_dict["STK_YLOW_RATE"] = ele_li[1]
-                        data_dict["STK_YHIGH_RATE"] = ele_li[3]
+                        data_dict["LOWEST_PRICE"] = ele_li[1]
+                        data_dict["HIGEST_PRICE"] = ele_li[3]
                     stk_p += 1
-
+        if not (len(data_dict)) == 9:
+            data_dict = {}
     except Exception as err:
         print("While prasing for day stocks = {}".format(err))
     return data_dict
@@ -196,23 +211,37 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                 bse_code = bs_txt_arr[0].split(":")[1]
                 nse_code = bs_txt_arr[1].split(":")[1].strip()
                 isin_code = bs_txt_arr[2].split(":")[1].strip()
-                sector = bs_txt_arr[3].split(":")[1]
+                sector = bs_txt_arr[3].split(":")[1].strip()
                 stk_result = {}
                 if nse_code:
-                    stk_result = mc_get_day_stk_details(bs, 'content_nse')
-                    print("RESULT in NSE = ", stk_result)
+                    stk_result = mc_get_day_stk_details(bs, 'content_nse', cmp_url)
+                    # print("RESULT in NSE = ", stk_result)
                 if not stk_result and isin_code:
-                    print("Processing in BSE  = ", stk_result)
-                    stk_result = mc_get_day_stk_details(bs, 'content_bse')
+                    stk_result = mc_get_day_stk_details(bs, 'content_bse', cmp_url)
                     # print("RESULT in BSE  = ", stk_result)
                 if stk_result:
                     comp_details = mc_get_perf_stk_details(bs)
                     comp_details['NAME'] = cmp_name
-                    comp_details['CATEGORY'] = sector
+                    category = 'N/A'
+                    sub_category = 'N/A'
+                    if sector:
+                        cat_list = sector.split("-")
+                        if len(cat_list) == 2:
+                            category = cat_list[0]
+                            sub_category = cat_list[1]
+                        else:
+                            category = sector
+                    comp_details['CATEGORY'] = category
+                    comp_details['SUB_CATEGORY'] = sub_category
+                    nse_code = nse_code if nse_code else isin_code
                     comp_details['NSE_CODE'] = nse_code
                     comp_details['URL'] = cmp_url
                     comp_details.update(stk_result)
 
+                else:
+                    print("COMP {} not listed or errored".format(cmp_url))
+            else:
+                print("COMP {} not listed or errored".format(cmp_url))
     except Exception as err:
         print("CMP URL", cmp_url)
         # raise err
@@ -221,24 +250,25 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
 
 def process_page(data_array, send_end, failed_que):
     results = []
-    print("Size of the data array from current process {} is {} ".format(multi.current_process().name, len(data_array)))
+    # print("Size of the data array from current process {} is {} "
+    # .format(multi.current_process().name, len(data_array)))
     for data in data_array:
         cmp_name, cmp_url = data.split("###")[0], data.split("###")[1]
-        print("URL = {} processed by {} ".format(cmp_url, multi.current_process().name))
+        # print("URL = {} processed by {} ".format(cmp_url, multi.current_process().name))
         try:
             result = mny_ctr_shr_frm_url(cmp_name, cmp_url)
             if result:
-                print("{} process output Result = {}".format(multi.current_process().name, result.get("NAME")))
+                # print("{} process output Result = {}".format(multi.current_process().name, result.get("NAME")))
                 results.append(result)
             else:
-                print("{} Parsing failed url {}= ".format(multi.current_process().name, cmp_url))
+                # print("{} Parsing failed url {}= ".format(multi.current_process().name, cmp_url))
                 failed_que.put(data)
         except Exception as err:
             print("Failed exception = ", str(err))
             failed_que.put(data)
     # After all data completed then send
-    print("Sending results {} to Main process from {}".format(len(results), multi.current_process().name))
-    print("Error results {} to Main process from {}".format(failed_que.qsize(), multi.current_process().name))
+    # print("Sending results {} to Main process from {}".format(len(results), multi.current_process().name))
+    # print("Error results {} to Main process from {}".format(failed_que.qsize(), multi.current_process().name))
     send_end.send(results)
 
 
@@ -255,10 +285,12 @@ def get_list_of_shares_mc(stock_url, first_time):
             url = stock_url + "/" + chr(one).upper()
             page_list = get_list_of_share_links(url)
             all_pages.extend(page_list)
-        all_pages = all_pages[:10]
+        all_pages = all_pages[:100]
+
         get_shares_details(all_pages, first_time)
 
 
 if __name__ == "__main__":
-    get_list_of_shares_mc(c.URL, True)
-
+    # get_list_of_shares_mc(c.URL, True)
+    mny_ctr_shr_frm_url('yes bank',
+                        'https://www.moneycontrol.com/india/stockpricequote/engineering-heavy/aakashexplorationservices/AES01')
