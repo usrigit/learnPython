@@ -20,7 +20,7 @@ STK_RATIO_ELEMENTS = {
 
 
 def get_ratios_from_mc(url):
-    # url = "https://www.moneycontrol.com/financials/afenterprises/ratiosVI/AFE01#AFE01"
+    # url = "https://www.moneycontrol.com/financials/abhinavleasingfinance/ratiosVI/ALF03#ALF03"
     print("Processing URL = ", url)
     bs = h.parse_url(url)
     data_frame = None
@@ -28,7 +28,6 @@ def get_ratios_from_mc(url):
         std_data = bs.find('div', {'class': 'PB10'}).find('div', {'class': 'FL gry10'})
         if std_data:
             nse_code = (std_data.text.split("|")[1]).split(":")[1].strip()
-            print("NSE_CODE", nse_code)
             nse_code = nse_code if nse_code else 'N/A'
             data = [
                 [
@@ -37,7 +36,7 @@ def get_ratios_from_mc(url):
                 ]
                 for table in bs.find_all("table", {"class": "table4"})[2:]
             ]
-            print("DATA = ", data)
+
             if data and len(data) > 0:
                 ele_list = data[0]
                 STK_RATIO_ELEMENTS['STK_YEAR'] = data[0][0]
@@ -51,6 +50,7 @@ def get_ratios_from_mc(url):
                     i += 1
                 print("STK RATIO = ", STK_RATIO_ELEMENTS)
                 data_frame = get_data_frame(nse_code, STK_RATIO_ELEMENTS)
+                print(data_frame)
 
     return data_frame
 
@@ -61,10 +61,13 @@ def get_data_frame(nse_code, data):
     pd.set_option('display.expand_frame_repr', False)
     pd.set_option('max_colwidth', 0)
     df = pd.DataFrame(data)
-    df = df.apply(pd.to_numeric, errors='ignore')
     df = df.assign(NSE_CODE=Series(nse_code, index=df.index))
+    cols = df.columns.drop(['STK_YEAR', 'NSE_CODE'])
+    df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+    df = df.fillna(0)
 
     return df
+
 
 def load_stk_ratio():
     df_frames = []
@@ -73,6 +76,7 @@ def load_stk_ratio():
     try:
         for file in files:
             read_lines = h.read_list_from_json_file(file)
+            print("No of urls to process", len(read_lines))
             for line in read_lines:
                 df = get_ratios_from_mc(line)
                 if df is not None and isinstance(df, pd.DataFrame) \
@@ -81,22 +85,25 @@ def load_stk_ratio():
     except Exception as err:
         print(str(err))
     print("Data frames size = ", len(df_frames))
-    result = pd.concat(df_frames, ignore_index=True)
-    if len(result) > 0:
-        df_columns = list(result)
-        table = "STK_PERF_HISTORY"
-        columns = ",".join(df_columns)
-        values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s);"
-        # create INSERT INTO table (columns) VALUES('%s',...)
-        insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
-        print("Count of rows insert into DB = ", len(result.values))
-        curr, con = db.get_connection()
-        execute_batch(curr, insert_stmt, result.values)
-        con.commit()
-        db.close_connection(con, curr)
+    try:
+        result = pd.concat(df_frames, ignore_index=True)
+        if len(result) > 0:
+            df_columns = list(result)
+            table = "STK_PERF_HISTORY"
+            columns = ",".join(df_columns)
+            values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+            # create INSERT INTO table (columns) VALUES('%s',...)
+            insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+            print("Count of rows insert into DB = ", len(result.values))
+            curr, con = db.get_connection()
+            execute_batch(curr, insert_stmt, result.values)
+            con.commit()
+            db.close_connection(con, curr)
+
+    except Exception as err:
+        print("Exception while inserting data into table ", str(err))
 
 
 if __name__ == "__main__":
     load_stk_ratio()
-    # get_ratios_from_mc("url")
-
+    #  get_ratios_from_mc("url")

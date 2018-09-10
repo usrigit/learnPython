@@ -66,42 +66,54 @@ def get_shares_details(all_pages, first_time_process):
     #         failed_pages.append(failed_que.get())
     #     print("Parsing failed page count = {}".format(len(failed_pages)))
     #     get_shares_details(failed_pages, False)
-    result_list = [x.recv() for x in spipe_list]
-    final_data = {}
-    ratio_links = []
+    try:
+        result_list = [x.recv() for x in spipe_list]
+        final_data = {}
+        ratio_links = []
+        print("FAILED URL COUNT = {}".format(failed_que.qsize()))
+        for results in result_list:
+            print("size of the results array from result_list = ", len(results))
+            for tmp_dict in results:
+                key = tmp_dict.get("CATEGORY")
+                link = tmp_dict.get("URL")
+                ratio_links.append(define_mc_ratio_link(link))
+                h.upd_dic_with_sub_list(key, tmp_dict, final_data)
+        if ratio_links and len(ratio_links) > 0:
+            print("Size of the RATIO array = ", len(ratio_links))
+            h.write_list_to_json_file(os.path.join(
+                commons.get_prop('base-path', 'output'), "5yrs_stk_ratio.txt"), ratio_links)
 
-    for results in result_list:
-        print("size of the results array from result_list = ", len(results))
-        for tmp_dict in results:
-            key = tmp_dict.get("CATEGORY")
-            link = tmp_dict.get("URL")
-            ratio_links.append(define_mc_ratio_link(link))
-            h.upd_dic_with_sub_list(key, tmp_dict, final_data)
-    if ratio_links and len(ratio_links) > 0:
-        print("Size of the RATIO array = ", len(ratio_links))
-        h.write_list_to_json_file(os.path.join(
-            commons.get_prop('base-path', 'output'), "5yrs_stk_ratio.txt"), ratio_links)
+        # Set pandas options
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.expand_frame_repr', False)
+        pd.set_option('max_colwidth', 0)
+        for category in final_data:
+            df = pd.DataFrame(final_data[category])
+            cols = df.columns.drop(['STK_DATE', 'NSE_CODE', 'NAME', 'CATEGORY', 'SUB_CATEGORY', 'URL'])
+            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+            df = df.fillna(0)
+            # print(df)
+            if len(df) > 0:
+                try:
+                    df_columns = list(df)
+                    table = "STK_DETAILS"
+                    columns = ",".join(df_columns)
+                    print("Batch started with count {} to insert into DB = ", len(df.values))
+                    values = "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
+                             "%s, %s, %s, %s, %s, %s, to_date(%s, 'YYYMONDD'), %s, %s, %s);"
+                    # create INSERT INTO table (columns) VALUES('%s',...)
+                    insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+                    curr, con = db.get_connection()
+                    execute_batch(curr, insert_stmt, df.values)
+                    con.commit()
+                    db.close_connection(con, curr)
+                    print("Batch inserted into DB successfully")
 
-    # Set pandas options
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.expand_frame_repr', False)
-    pd.set_option('max_colwidth', 0)
-    for category in final_data:
-        df = pd.DataFrame(final_data[category])
-        if len(df) > 0:
-            df_columns = list(df)
-            table = "STK_DETAILS"
-            columns = ",".join(df_columns)
-            print(df.values)
-            values = "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
-                     "%s, %s, %s, %s, %s, %s, to_date(%s, 'YYYMONDD'), %s, %s, %s);"
-            # create INSERT INTO table (columns) VALUES('%s',...)
-            insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
-            print("Count of rows insert into DB = ", len(df.values))
-            curr, con = db.get_connection()
-            execute_batch(curr, insert_stmt, df.values)
-            con.commit()
-            db.close_connection(con, curr)
+                except Exception as err:
+                    print("While inserting data into DB exception = {}".format(err))
+
+    except Exception as err:
+        print("Exception in get_share_details function = {}".format(err))
 
     print("Execution time = {0:.5f}".format(time.time() - start))
 
@@ -139,11 +151,12 @@ def mc_get_perf_stk_details(bs):
                     __tag_name = cd.text
                 if cd.name == 'div' and cd.get('class', '') == ['FR', 'gD_12']:
                     __tag_value = cd.text
-
+                # print("BFR tag Name = {} and value = {}".format(__tag_name, __tag_value))
                 if __tag_name and __tag_value and __tag_name in c.STK_RATIO_CON:
                     __tag_name = c.STK_RATIO_CON[__tag_name]
                     if __tag_name not in ['NAME', 'CATEGORY', 'SUB_CATEGORY']:
                         __tag_value = h.extract_float(__tag_value)
+                    # print("AFR tag Name = {} and value = {}".format(__tag_name, __tag_value))
                     comp_details[__tag_name] = __tag_value
                     __tag_name, __tag_value = None, None
         # print("COMP DETAILS =", comp_details)
@@ -157,18 +170,18 @@ def mc_get_perf_stk_details(bs):
 def mc_get_day_stk_details(bs, id, cmp_url):
     data_dict = {}
     try:
+        # Get date, stock current price and traded volume
         if bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}):
             bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PB5'}).findAll('div')
             if bse_data:
                 year = time.strftime("%Y")
                 bse_dt = bse_data[3].text.split(",")[0].strip()
-                if bse_dt:
+                if bse_dt and len(bse_dt) > 5:
                     data_dict["STK_DATE"] = year + ' ' + bse_dt
-                    print("date = {} and dic date = {} and URL= {}".format(bse_dt, data_dict["STK_DATE"], cmp_url))
                 data_dict["CURR_PRICE"] = bse_data[4].text.strip()
                 bse_st_vol = h.alpnum_to_num(bse_data[6].text.strip().split("\n")[0])
-                data_dict["TRADED_VOLUME"] = bse_st_vol
-
+                data_dict["TRADED_VOLUME"] = bse_st_vol.strip()
+        # Get previous and open price of the share
         if bs.find('div', {'id': id}).find('div', {'class': 'brdb PA5'}):
             bse_data = bs.find('div', {'id': id}).find('div', {'class': 'brdb PA5'}).findAll('div')
             stk_prc = 0
@@ -179,7 +192,7 @@ def mc_get_day_stk_details(bs, id, cmp_url):
                     elif stk_prc == 1:
                         data_dict["OPEN_PRICE"] = ele.text.strip()
                     stk_prc += 1
-
+        # Get low, high and 52 week prices
         if bs.find('div', {'id': id}).find('div', {'class': "PT10 clearfix"}):
             bse_data = bs.find('div', {'id': id}).find('div', {'class': "PT10 clearfix"}).findAll('div')
             stk_p = 0
@@ -215,10 +228,10 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                 stk_result = {}
                 if nse_code:
                     stk_result = mc_get_day_stk_details(bs, 'content_nse', cmp_url)
-                    # print("RESULT in NSE = ", stk_result)
+                    # print("STK DAY details NSE = ", stk_result)
                 if not stk_result and isin_code:
                     stk_result = mc_get_day_stk_details(bs, 'content_bse', cmp_url)
-                    # print("RESULT in BSE  = ", stk_result)
+                    # print("STK DAY details BSE  = ", stk_result)
                 if stk_result:
                     comp_details = mc_get_perf_stk_details(bs)
                     comp_details['NAME'] = cmp_name
@@ -226,9 +239,9 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                     sub_category = 'N/A'
                     if sector:
                         cat_list = sector.split("-")
-                        if len(cat_list) == 2:
+                        if len(cat_list) > 1:
                             category = cat_list[0]
-                            sub_category = cat_list[1]
+                            sub_category = cat_list[1:]
                         else:
                             category = sector
                     comp_details['CATEGORY'] = category
@@ -237,13 +250,13 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
                     comp_details['NSE_CODE'] = nse_code
                     comp_details['URL'] = cmp_url
                     comp_details.update(stk_result)
-
+                    # print("STK complete details = ", comp_details)
                 else:
                     print("COMP {} not listed or errored".format(cmp_url))
             else:
                 print("COMP {} not listed or errored".format(cmp_url))
     except Exception as err:
-        print("CMP URL", cmp_url)
+        print("CMP URL = {} with error = {}".format(cmp_url, err))
         # raise err
     return comp_details
 
@@ -285,12 +298,16 @@ def get_list_of_shares_mc(stock_url, first_time):
             url = stock_url + "/" + chr(one).upper()
             page_list = get_list_of_share_links(url)
             all_pages.extend(page_list)
-        all_pages = all_pages[:100]
-
+        # all_pages = all_pages[:100]
+        # all_pages = ['A###https://www.moneycontrol.com/india/stockpricequote/miscellaneous/bhagyanagarproperties/BP13',
+        #              'B###https://www.moneycontrol.com/india/stockpricequote/miscellaneous/amjumbobags/JB03']
+        # all_pages = get_list_of_share_links(stock_url)
         get_shares_details(all_pages, first_time)
 
 
 if __name__ == "__main__":
-    # get_list_of_shares_mc(c.URL, True)
-    mny_ctr_shr_frm_url('yes bank',
-                        'https://www.moneycontrol.com/india/stockpricequote/engineering-heavy/aakashexplorationservices/AES01')
+    get_list_of_shares_mc(c.URL, True)
+    # map = mny_ctr_shr_frm_url('yes bank',
+    #                      'https://www.moneycontrol.com/india/stockpricequote/miscellaneous/bhagyanagarproperties/BP13')
+    # df = pd.DataFrame(map)
+    # print(df)
