@@ -10,11 +10,6 @@ logger.init("MC Reader Process Pool", c.INFO)
 log = logging.getLogger("MC Reader Process Pool")
 
 
-def chunks(n, page_list):
-    """Splits the list into n chunks"""
-    return np.array_split(page_list, n)
-
-
 def get_list_of_share_links(stock_url):
     print("Parent URL = ", stock_url)
     shares = get_shrs_from_mnctl(stock_url)

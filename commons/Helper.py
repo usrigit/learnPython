@@ -8,6 +8,7 @@ import requests
 import re, json, datetime
 from bs4 import BeautifulSoup
 from collections import OrderedDict
+import numpy as np
 
 
 def catch_exceptions(job_func):
@@ -131,6 +132,7 @@ def write_list_to_json_file(filename, data_list):
         json.dump(data_list, file)
     file.close()
 
+
 def read_list_from_json_file(filename):
     output = []
     # open output file for reading
@@ -139,3 +141,6 @@ def read_list_from_json_file(filename):
     file.close()
     return output
 
+def chunks(n, page_list):
+    """Splits the list into n chunks"""
+    return np.array_split(page_list, n)
