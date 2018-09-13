@@ -4,7 +4,7 @@ import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from pandas import Series
 from psycopg2.extras import execute_batch
-import traceback
+import traceback, time
 
 dict1 = {'key1': [1, 2, 3], 'key2': [11, 21, 31]}
 dict2 = {'key1': [4, 5], 'key2': [41, 51]}
@@ -198,10 +198,15 @@ def get_yahoo_fin_urls():
         except Exception as err:
             print("Exception = ", str(err))
     print("No of URLs = ", len(urls))
+    return urls
+
+
 
 def parse_yahoo_stk_hist(url):
 
     try:
+        name = url.split("=")[1].split(".")[0]
+        # print("Name = ", name)
         bs = h.parse_url(url)
         if bs:
             table = bs.find('div', {'class': "Pb(10px) Ovx(a) W(100%)"}).find_all("table", {"class": "W(100%) M(0)"})[0]
@@ -209,24 +214,31 @@ def parse_yahoo_stk_hist(url):
                 [td.string.strip() for td in tr.find_all('td') if td.string]
                 for tr in table.find_all('tr')[2:]
             ][:-1]
-            print(data)
+            # print(data)
             # data.insert(0, ['STK_DATE', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'ACLOSE', 'VOLUME'])
             # Set pandas options
             pd.set_option('display.max_columns', None)
             pd.set_option('display.expand_frame_repr', False)
             pd.set_option('max_colwidth', 0)
             df = pd.DataFrame(data, columns=['STK_DATE', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'ACLOSE', 'VOLUME'])
-            df = df.assign(NSE_CODE=Series('3IINFOTECH', index=df.index))
+            df = df.assign(NSE_CODE=Series(name, index=df.index))
             df['VOLUME'] = df['VOLUME'].replace({'\$': '', ',': ''}, regex=True)
             df = df.drop(columns='ACLOSE')
+            # Drop a row by condition
+            df = df[df['OPEN'].notnull()]
+            drop_cols = ['STK_DATE', 'NSE_CODE']
+            cols = df.columns.drop(drop_cols)
+            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+            df = df.fillna(0)
+
             if len(df) > 0:
                 df_columns = list(df)
                 table = "STK_INFO_HISTORY"
                 columns = ",".join(df_columns)
-                print("Columns = ", columns)
+                # print("Columns = ", columns)
                 values = "(to_date(%s, 'DD-MON-YYYY'), %s, %s, %s, %s, %s, %s);"
-                print("Values = ", values)
-                print(df.values)
+                # print("Values = ", values)
+                # print(df.values)
                 # create INSERT INTO table (columns) VALUES('%s',...)
                 insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
                 print(insert_stmt)
@@ -247,9 +259,13 @@ def parse_yahoo_stk_hist(url):
 
 if __name__ == "__main__":
     # create()
-    # urls = get_yahoo_fin_urls()
-    url = "https://in.finance.yahoo.com/quote/3IINFOTECH.NS/history?p=3IINFOTECH.NS"
-    parse_yahoo_stk_hist(url)
+    st_time = time.time()
+    urls = get_yahoo_fin_urls()
+    print("Execution time after getting urls = {0:.5f}".format(time.time() - st_time))
+    #url = "https://in.finance.yahoo.com/quote/3IINFOTECH.NS/history?p=3IINFOTECH.NS"
+    for url in urls:
+        parse_yahoo_stk_hist(url)
+    print("Execution time = {0:.5f}".format(time.time() - st_time))
 
 
     # cat_up = category.upper()*-m / nhb-
