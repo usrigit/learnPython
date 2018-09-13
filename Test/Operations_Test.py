@@ -4,6 +4,7 @@ import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from pandas import Series
 from psycopg2.extras import execute_batch
+import traceback
 
 dict1 = {'key1': [1, 2, 3], 'key2': [11, 21, 31]}
 dict2 = {'key1': [4, 5], 'key2': [41, 51]}
@@ -117,74 +118,151 @@ ratio_elements = {
     'CURR_RATIO': [0.0, 0.0, 0.0, 0.0, 0.0],
     'DEBT_EQUITY': [0.0, 0.0, 0.0, 0.0, 0.0]
 }
-stock_ratio = {}
-url = "https://www.moneycontrol.com/financials/yesbank/ratiosVI/YB#YB"
-bs = h.parse_url(url)
-if bs:
-    std_data = bs.find('div', {'class': 'PB10'}).find('div', {'class': 'FL gry10'})
-    nse_code = (std_data.text.split("|")[1]).split(":")[1].strip()
-    print("NSE_CODE", nse_code)
-    data = [
-        [
-            [td.string.strip() for td in tr.find_all('td') if td.string]
-            for tr in table.find_all('tr')[2:]
-        ]
-        for table in bs.find_all("table", {"class": "table4"})[2:]
-    ]
-    ele_list = data[0]
-    ratio_elements['STK_YEAR'] = data[0][0]
-    i = 2
-    while i < len(ele_list) - 4:
-        arr = ele_list[i]
-        if len(arr) > 5:
-            key = ratio_con.get(arr[0])
-            val = arr[1:]
-            if key: ratio_elements[key] = val
-        i += 1
-    print("STK RATIO = ", ratio_elements)
-    # Set pandas options
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.expand_frame_repr', False)
-    pd.set_option('max_colwidth', 0)
-    df = pd.DataFrame(ratio_elements)
-    df = df.apply(pd.to_numeric, errors='ignore')
-    df = df.assign(NSE_CODE=Series(nse_code, index=df.index))
 
-    if len(df) > 0:
-        df_columns = list(df)
-        table = "STK_PERF_HISTORY"
-        columns = ",".join(df_columns)
-        print("Columns = ", columns)
-        values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s);"
-        print("Values = ", values)
-        print(df.values)
-        # create INSERT INTO table (columns) VALUES('%s',...)
-        insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
-        print(insert_stmt)
-        conn = psycopg2.connect(database="trading",
-                                user="postgres",
-                                password="postgres")
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
-        execute_batch(cursor, insert_stmt, df.values)
-        conn.commit()
-        cursor.close()
+
+def parse_url():
+    stock_ratio = {}
+    url = "https://www.moneycontrol.com/financials/yesbank/ratiosVI/YB#YB"
+    bs = h.parse_url(url)
+    if bs:
+        std_data = bs.find('div', {'class': 'PB10'}).find('div', {'class': 'FL gry10'})
+        nse_code = (std_data.text.split("|")[1]).split(":")[1].strip()
+        print("NSE_CODE", nse_code)
+        data = [
+            [
+                [td.string.strip() for td in tr.find_all('td') if td.string]
+                for tr in table.find_all('tr')[2:]
+            ]
+            for table in bs.find_all("table", {"class": "table4"})[2:]
+        ]
+        ele_list = data[0]
+        ratio_elements['STK_YEAR'] = data[0][0]
+        i = 2
+        while i < len(ele_list) - 4:
+            arr = ele_list[i]
+            if len(arr) > 5:
+                key = ratio_con.get(arr[0])
+                val = arr[1:]
+                if key: ratio_elements[key] = val
+            i += 1
+        print("STK RATIO = ", ratio_elements)
+        # Set pandas options
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.expand_frame_repr', False)
+        pd.set_option('max_colwidth', 0)
+        df = pd.DataFrame(ratio_elements)
+        df = df.apply(pd.to_numeric, errors='ignore')
+        df = df.assign(NSE_CODE=Series(nse_code, index=df.index))
+
+        if len(df) > 0:
+            df_columns = list(df)
+            table = "STK_PERF_HISTORY"
+            columns = ",".join(df_columns)
+            print("Columns = ", columns)
+            values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+            print("Values = ", values)
+            print(df.values)
+            # create INSERT INTO table (columns) VALUES('%s',...)
+            insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+            print(insert_stmt)
+            conn = psycopg2.connect(database="trading",
+                                    user="postgres",
+                                    password="postgres")
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            execute_batch(cursor, insert_stmt, df.values)
+            conn.commit()
+            cursor.close()
+
+
+def get_yahoo_fin_urls():
+    NO_URL_COUNT=1500
+    yahoo = "https://in.finance.yahoo.com"
+    i = 0
+    url_list = []
+    while i < NO_URL_COUNT:
+        url = "https://in.finance.yahoo.com/most-active?offset=" + str(i) + "&count=25"
+        url_list.append(url)
+        i += 25
+    urls = []
+    for url in url_list:
+        try:
+            bs = h.parse_url(url)
+            if bs:
+                std_data = bs.find('div', {'class': "Ovx(s)"}).find_all("table", {"class": "W(100%)"})[0].find_all('tr')
+                for tr in std_data:
+                    link = tr.find('a', href=True, text=True)['href']
+                    url = (yahoo + link).replace('?p', '/history?p')
+                    if url not in urls:
+                        urls.append(url)
+        except Exception as err:
+            print("Exception = ", str(err))
+    print("No of URLs = ", len(urls))
+
+def parse_yahoo_stk_hist(url):
+
+    try:
+        bs = h.parse_url(url)
+        if bs:
+            table = bs.find('div', {'class': "Pb(10px) Ovx(a) W(100%)"}).find_all("table", {"class": "W(100%) M(0)"})[0]
+            data = [
+                [td.string.strip() for td in tr.find_all('td') if td.string]
+                for tr in table.find_all('tr')[2:]
+            ][:-1]
+            print(data)
+            # data.insert(0, ['STK_DATE', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'ACLOSE', 'VOLUME'])
+            # Set pandas options
+            pd.set_option('display.max_columns', None)
+            pd.set_option('display.expand_frame_repr', False)
+            pd.set_option('max_colwidth', 0)
+            df = pd.DataFrame(data, columns=['STK_DATE', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'ACLOSE', 'VOLUME'])
+            df = df.assign(NSE_CODE=Series('3IINFOTECH', index=df.index))
+            df['VOLUME'] = df['VOLUME'].replace({'\$': '', ',': ''}, regex=True)
+            df = df.drop(columns='ACLOSE')
+            if len(df) > 0:
+                df_columns = list(df)
+                table = "STK_INFO_HISTORY"
+                columns = ",".join(df_columns)
+                print("Columns = ", columns)
+                values = "(to_date(%s, 'DD-MON-YYYY'), %s, %s, %s, %s, %s, %s);"
+                print("Values = ", values)
+                print(df.values)
+                # create INSERT INTO table (columns) VALUES('%s',...)
+                insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+                print(insert_stmt)
+                conn = psycopg2.connect(database="trading",
+                                        user="postgres",
+                                        password="postgres")
+                conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+                cursor = conn.cursor()
+                execute_batch(cursor, insert_stmt, df.values)
+                conn.commit()
+                cursor.close()
+
+            print(df)
+    except Exception as err:
+        traceback.print_exc()
+        print("Exception = ", str(err))
+
 
 if __name__ == "__main__":
     # create()
-    pass
+    # urls = get_yahoo_fin_urls()
+    url = "https://in.finance.yahoo.com/quote/3IINFOTECH.NS/history?p=3IINFOTECH.NS"
+    parse_yahoo_stk_hist(url)
 
-        # cat_up = category.upper()
-        # print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
-        # df = pd.DataFrame(final_data[category])
-        # df = df.set_index("NAME")
-        # # Slice it as needed
-        # sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
-        #                        'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
-        # filtered_df = sliced_df[sliced_df['EPS (TTM)'] != '-']
-        # filtered_df = filtered_df.apply(pd.to_numeric, errors='ignore')
-        # sorted_df = filtered_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
-        # writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
-        #                              engine='xlsxwriter')
-        # sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
-        # writer_orig.save()
+
+    # cat_up = category.upper()*-m / nhb-
+    # print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
+    # df = pd.DataFrame(final_data[category])
+    # df = df.set_index("NAME")
+    # # Slice it as needed
+    # sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
+    #                        'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
+    # filtered_df = sliced_df[sliced_df['EPS (TTM)'] != '-']
+    # filtered_df = filtered_df.apply(pd.to_numeric, errors='ignore')
+    # sorted_df = filtered_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
+    # writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
+    #                              engine='xlsxwriter')
+    # sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
+    # writer_orig.save()
