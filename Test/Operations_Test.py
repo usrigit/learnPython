@@ -222,8 +222,9 @@ def parse_yahoo_stk_hist(url):
             pd.set_option('max_colwidth', 0)
             df = pd.DataFrame(data, columns=['STK_DATE', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'ACLOSE', 'VOLUME'])
             df = df.assign(NSE_CODE=Series(name, index=df.index))
-            df['VOLUME'] = df['VOLUME'].replace({'\$': '', ',': ''}, regex=True)
             df = df.drop(columns='ACLOSE')
+            cols = ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']
+            df[cols] = df[cols].replace({'\$': '', ',': ''}, regex=True)
             # Drop a row by condition
             df = df[df['OPEN'].notnull()]
             drop_cols = ['STK_DATE', 'NSE_CODE']
@@ -241,7 +242,6 @@ def parse_yahoo_stk_hist(url):
                 # print(df.values)
                 # create INSERT INTO table (columns) VALUES('%s',...)
                 insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
-                print(insert_stmt)
                 conn = psycopg2.connect(database="trading",
                                         user="postgres",
                                         password="postgres")
@@ -250,8 +250,6 @@ def parse_yahoo_stk_hist(url):
                 execute_batch(cursor, insert_stmt, df.values)
                 conn.commit()
                 cursor.close()
-
-            print(df)
     except Exception as err:
         traceback.print_exc()
         print("Exception = ", str(err))

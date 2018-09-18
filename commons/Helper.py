@@ -39,6 +39,15 @@ def upd_dic_with_sub_list(p_key, val, p_dic):
         p_dic[p_key] = temp_val
 
 
+def upd_dic_with_sub_list_ext(p_key, val, p_dic):
+    if p_key in p_dic:
+        temp_val = p_dic.get(p_key)
+        temp_val.extend(val)
+    else:
+        temp_val = [val]
+        p_dic[p_key] = temp_val
+
+
 def get_eps_data(url):
     try:
         bs = parse_url(url)
