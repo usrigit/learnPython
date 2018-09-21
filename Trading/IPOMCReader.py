@@ -6,12 +6,54 @@ from commons import Helper as h
 from commons import Constants as c
 from commons import logger
 import multiprocessing as multi, traceback
-import matplotlib.pyplot as plt
+from dao import PostgreSQLCon as db
+from psycopg2.extras import execute_batch
 
 URL = commons.get_prop('common', 'ipo-url')
 PROCESS_COUNT = commons.get_prop('common', 'process_cnt')
 logger.init("IPOMC Reader", c.INFO)
 log = logging.getLogger("IPOMC Reader")
+
+DATABASE_COLUMNS = ['NAME', 'LISTED_DATE', 'ISSUED_PRICE', 'LISTED_PRICE', 'LISTED_GAIN',
+                                     'CURR_PRICE', 'PROFIT_LOSS', 'NSE_CODE', 'OPEN_PRICE', 'HIGH_PRICE',
+                                     'LOW_PRICE', 'VOLUME', 'PREV_PRICE']
+
+
+def create_update_query(table):
+    """This function creates an upsert query which replaces existing data based on primary key conflicts"""
+    columns = ', '.join(DATABASE_COLUMNS)
+    constraint = 'NSE_CODE'
+    placeholder = "%s, to_date(%s, 'MON-DD-YYYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+    updates = ', '.join([f'{col} = EXCLUDED.{col}' for col in DATABASE_COLUMNS])
+    query = f"""INSERT INTO {table} ({columns}) 
+                VALUES ({placeholder}) 
+                ON CONFLICT ({constraint}) 
+                DO UPDATE SET {updates};"""
+    query.split()
+    query = ' '.join(query.split())
+    print(query)
+    return query
+
+
+def get_data_frame(data):
+    # Set pandas options
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.expand_frame_repr', False)
+    pd.set_option('max_colwidth', 0)
+    df = pd.DataFrame(data, columns=['NAME', 'LISTED_DATE', 'ISSUED_PRICE', 'LISTED_PRICE', 'LISTED_GAIN',
+                                     'CURR_PRICE', 'PROFIT_LOSS', 'NSE_CODE', 'OPEN_PRICE', 'HIGH_PRICE',
+                                     'LOW_PRICE', 'VOLUME', 'PREV_PRICE'])
+    # Replace special char from below columns
+    cols = ['LISTED_GAIN', 'PROFIT_LOSS']
+    df[cols] = df[cols].replace({'%': ''}, regex=True)
+    # Drop a row by condition
+    df = df[df['LISTED_DATE'].notnull()]
+    # convert numeric except listed columns
+    drop_cols = ['LISTED_DATE', 'NSE_CODE', 'NAME']
+    cols = df.columns.drop(drop_cols)
+    df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+    df = df.fillna(0)
+    return df
 
 
 def get_listed_ipo(stock_url):
@@ -37,15 +79,21 @@ def get_listed_ipo(stock_url):
         job.join(timeout=10)
     print("All jobs completed......")
     try:
+        ipo_size = 0
         result_list = [x.recv() for x in spipe_list]
-        final_list = []
+        curr, con = db.get_connection()
+        statement = create_update_query('IPO_STK_DETAILS')
         for results in result_list:
             for data in results:
                 values = [data[k] for k in data]
-                final_list.extend(values)
-
-        print("IPOs listed so far = {}".format(len(final_list)))
-        print(final_list)
+                ipo_size += len(values)
+                df = get_data_frame(values)
+                records = df.to_dict(orient='records')
+                print(records)
+                execute_batch(curr, statement, df.values)
+                con.commit()
+        db.close_connection(con, curr)
+        print("IPOs listed so far = {}".format(ipo_size))
     except Exception as err:
         traceback.print_exc()
         print(str(err))
@@ -58,12 +106,7 @@ def process_page(data_array, send_end):
     .format(multi.current_process().name, len(data_array)))
     for data in data_array:
         try:
-            ipo_d, ipo_p = get_ipo_details_perf(data)
-            for ipo in ipo_p:
-                link = ipo_p.get(ipo)
-                ipo_details = get_ipo_day_info(link)
-                if ipo_details:
-                    h.upd_dic_with_sub_list_ext(ipo, ipo_details, ipo_d)
+            ipo_d = get_ipo_details_perf(data)
             results.append(ipo_d)
         except Exception as err:
             print("Failed exception = ", str(err))
@@ -92,7 +135,7 @@ def get_nse_code(url):
 
     except Exception as err:
         print("While parsing for NSE code", str(err))
-    return nse_code, isin_code
+    return nse_code
 
 
 def get_ipo_day_info(link):
@@ -110,7 +153,6 @@ def get_ipo_day_info(link):
             else:
                 ipo_details.append(isin)
             ipo_details.append(face_val)
-
             table = bs.find("table", {"class": "table table-condensed table-bordered table-striped table-nonfluid"})
             rows = table.findAll("tr")
             # curr_price = rows[1].findAll("td")[0].find('span').text.strip()
@@ -123,8 +165,8 @@ def get_ipo_day_info(link):
             ipo_details.append(open_price)
             ipo_details.append(high)
             ipo_details.append(low)
-            ipo_details.append(prev_price)
             ipo_details.append(turn_over)
+            ipo_details.append(prev_price)
             if len(ipo_details) == 8:
                 return ipo_details
     except Exception as err:
@@ -139,7 +181,7 @@ def get_listed_details(element):
     data = element.text.strip().split('\n')
     for record in data:
         if ": " in record:
-            if not "Change(Rs):" in record:
+            if not (("Change(Rs):" in record) or ('Last Trade(Rs):' in record)):
                 day_trade.append(record.split(":")[1].strip())
     url = None
     for a in element.find_all('a', href=True):
@@ -147,17 +189,15 @@ def get_listed_details(element):
             url = a['href']
     print("FINAL URL = ", url)
     if url:
-        nse_code, isin_code = get_nse_code(url)
+        nse_code = get_nse_code(url)
         day_trade.insert(0, nse_code)
-        day_trade.insert(1, isin_code)
-    print("TRADE = ", day_trade)
+    # print("TRADE = ", day_trade)
     return day_trade
 
 
 def get_ipo_details_perf(url):
 
     ipo_details = {}
-    ipo_code_day = {}
     try:
         bs = h.parse_url(url)
         print("URL = ", url)
@@ -189,7 +229,7 @@ def get_ipo_details_perf(url):
                         if not (i == 2 or i == 3):
                             ele_list.append(__val)
                     ipo_details[__key] = ele_list
-                    print("IPO details = ", ipo_details)
+
                 elif row%2 == 0:
                     divs = rows[row].find_all('div')[0]
                     sub_div = divs.descendants
@@ -199,12 +239,12 @@ def get_ipo_details_perf(url):
                             day_data = get_listed_details(div)
                             h.upd_dic_with_sub_list_ext(__key, day_data, ipo_details)
                         i += 1
-                # print("IOP details = ", ipo_details)
+
                 row += 1
     except Exception as err:
         traceback.print_exc()
         print("Exception =", str(err))
-    return ipo_details, ipo_code_day
+    return ipo_details
 
 
 def get_list_of_urls(url):
@@ -220,6 +260,7 @@ def get_list_of_urls(url):
 
 
 if __name__ == "__main__":
-    # get_listed_ipo(URL)
-    get_ipo_details_perf('http://www.chittorgarh.com/ipo/ipo_perf_tracker.asp?FormIPOPT_Page=3')
+    # create_update_query('IPO_STK_DETAILS')
+    get_listed_ipo(URL)
+    # get_ipo_details_perf('http://www.chittorgarh.com/ipo/ipo_perf_tracker.asp?FormIPOPT_Page=3')
     # get_nse_code('http://www.chittorgarh.com/ipo/cochin-shipyard-ipo/684/')
