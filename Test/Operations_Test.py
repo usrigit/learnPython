@@ -157,14 +157,11 @@ def parse_url():
         if len(df) > 0:
             df_columns = list(df)
             table = "STK_PERF_HISTORY"
-            columns = ",".join(df_columns)
-            print("Columns = ", columns)
-            values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s);"
-            print("Values = ", values)
-            print(df.values)
+            values = "to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s"
+            constraint = ', '.join(['NAME', 'NSE_CODE', 'STK_YEAR'])
             # create INSERT INTO table (columns) VALUES('%s',...)
-            insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
-            print(insert_stmt)
+            insert_stmt = create_update_query(table, df_columns, values, constraint)
+            print("PERF HIST= ", insert_stmt)
             conn = psycopg2.connect(database="trading",
                                     user="postgres",
                                     password="postgres")
@@ -235,13 +232,9 @@ def parse_yahoo_stk_hist(url):
             if len(df) > 0:
                 df_columns = list(df)
                 table = "STK_INFO_HISTORY"
-                columns = ",".join(df_columns)
-                # print("Columns = ", columns)
-                values = "(to_date(%s, 'DD-MON-YYYY'), %s, %s, %s, %s, %s, %s);"
-                # print("Values = ", values)
-                # print(df.values)
-                # create INSERT INTO table (columns) VALUES('%s',...)
-                insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
+                constraint = ', '.join(['STK_DATE', 'NSE_CODE'])
+                values = "to_date(%s, 'DD-MON-YYYY'), %s, %s, %s, %s, %s, %s"
+                insert_stmt = create_update_query(table, df_columns, values, constraint)
                 conn = psycopg2.connect(database="trading",
                                         user="postgres",
                                         password="postgres")
@@ -253,6 +246,20 @@ def parse_yahoo_stk_hist(url):
     except Exception as err:
         traceback.print_exc()
         print("Exception = ", str(err))
+
+
+def create_update_query(table, df_columns, values, constraint):
+    """This function creates an upsert query which replaces existing data based on primary key conflicts"""
+    columns = ",".join(df_columns)
+    updates = ', '.join([f'{col} = EXCLUDED.{col}' for col in df_columns])
+    query = f"""INSERT INTO {table} ({columns}) 
+                VALUES ({values}) 
+                ON CONFLICT ({constraint}) 
+                DO UPDATE SET {updates};"""
+    query.split()
+    query = ' '.join(query.split())
+    print(query)
+    return query
 
 
 if __name__ == "__main__":

@@ -48,6 +48,20 @@ def upd_dic_with_sub_list_ext(p_key, val, p_dic):
         p_dic[p_key] = temp_val
 
 
+def create_update_query(table, df_columns, values, constraint):
+    """This function creates an upsert query which replaces existing data based on primary key conflicts"""
+    columns = ",".join(df_columns)
+    updates = ', '.join([f'{col} = EXCLUDED.{col}' for col in df_columns])
+    query = f"""INSERT INTO {table} ({columns}) 
+                VALUES ({values}) 
+                ON CONFLICT ({constraint}) 
+                DO UPDATE SET {updates};"""
+    query.split()
+    query = ' '.join(query.split())
+    print(query)
+    return query
+
+
 def get_eps_data(url):
     try:
         bs = parse_url(url)
@@ -149,6 +163,7 @@ def read_list_from_json_file(filename):
         output = json.load(file)
     file.close()
     return output
+
 
 def chunks(n, page_list):
     """Splits the list into n chunks"""

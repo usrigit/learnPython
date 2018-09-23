@@ -1,4 +1,4 @@
-import commons, os
+import commons, os, time
 from commons import Helper as h
 from commons import Constants as c
 from pandas import Series
@@ -114,6 +114,8 @@ def log_result(result):
 
 
 def load_stk_ratio():
+    # Variables declaration
+    start = time.time()
     file_path = os.path.join(commons.get_prop('base-path', 'ratio-input'))
     files = [os.path.join(file_path, fn) for fn in next(os.walk(file_path))[2]]
     all_pages = []
@@ -139,11 +141,10 @@ def load_stk_ratio():
                 if len(result) > 0:
                     df_columns = list(result)
                     table = "STK_PERF_HISTORY"
-                    columns = ",".join(df_columns)
-                    values = "(to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+                    values = "to_date(%s, 'MONYY'), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                    constraint = ', '.join(['NAME', 'NSE_CODE', 'STK_YEAR'])
                     # create INSERT INTO table (columns) VALUES('%s',...)
-                    insert_stmt = "INSERT INTO {} ({}) VALUES {}".format(table, columns, values)
-                    print("Count of rows inserting into DB = ", len(result.values))
+                    insert_stmt = h.create_update_query(table, df_columns, values, constraint)
                     curr, con = db.get_connection()
                     execute_batch(curr, insert_stmt, result.values)
                     con.commit()
@@ -154,6 +155,7 @@ def load_stk_ratio():
 
     except Exception as err:
         print(str(err))
+    print("Execution time = {0:.5f}".format(time.time() - start))
 
 
 if __name__ == "__main__":
