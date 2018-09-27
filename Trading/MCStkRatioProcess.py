@@ -2,9 +2,9 @@ import commons, os, time
 from commons import Helper as h
 from commons import Constants as c
 from pandas import Series
+from dao import PostgreSQLCon as db
 from psycopg2.extras import execute_batch
 import pandas as pd
-from dao import PostgreSQLCon as db
 from multiprocessing.dummy import Pool as ThreadPool
 import traceback
 

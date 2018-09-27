@@ -5,7 +5,9 @@ from commons import Helper as h
 from commons import Constants as c
 from commons import logger
 import pandas as pd
-import commons, os
+from dao import PostgreSQLCon as db
+from psycopg2.extras import execute_batch
+from Trading import MCReaderProcessProc as mcp
 
 logger.init("MC Reader", c.INFO)
 log = logging.getLogger("MC Reader")
@@ -21,12 +23,12 @@ def get_shares_details(stock_url, thread_count):
     start = time.time()
     # Get the shares from money control
     shares = get_shrs_from_mnctl(stock_url)
-    log.info("Total number of shares returned = {}".format(len(shares)))
+    print("Total number of shares returned = {}".format(len(shares)))
     # shares = {k: shares[k] for k in list(shares)[:50]}
     if shares and len(shares) > 0:
         # put into Queue
         url_que = get_shares_category(shares)
-        log.info("Shares added to Queue to process...")
+        print("Shares added to Queue to process...")
 
     for i in range(thread_count):
         t = threading.Thread(target=process_queue, args=(url_que, results_que, failed_que))
@@ -34,8 +36,8 @@ def get_shares_details(stock_url, thread_count):
         t.start()
 
     url_que.join()
-    log.info("Failed url count = {}".format(failed_que.qsize()))
-    log.info("Success url count = {}".format(results_que.qsize()))
+    print("Failed url count = {}".format(failed_que.qsize()))
+    print("Success url count = {}".format(results_que.qsize()))
 
     while not failed_que.empty():
         log.warning("Failed URL details = {}".format(failed_que.get()))
@@ -46,21 +48,51 @@ def get_shares_details(stock_url, thread_count):
         tmp_dict = results_que.get()
         key = tmp_dict.get("CATEGORY")
         h.upd_dic_with_sub_list(key, tmp_dict, final_data)
-    pd.set_option('display.max_columns', 15)
-    for category in final_data:
-        cat_up = category.upper()
-        print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
-        df = pd.DataFrame(final_data[category])
-        df = df.set_index("NAME")
-        # Slice it as needed
-        sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
-                               'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
-        sliced_df = sliced_df.apply(pd.to_numeric, errors='ignore')
-        sorted_df = sliced_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
-        writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
-                                     engine='xlsxwriter')
-        sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
-        writer_orig.save()
+        # Set pandas options
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.expand_frame_repr', False)
+        pd.set_option('max_colwidth', 0)
+        for category in final_data:
+            df = pd.DataFrame(final_data[category])
+            cols = df.columns.drop(['STK_DATE', 'NSE_CODE', 'NAME', 'CATEGORY', 'SUB_CATEGORY', 'URL'])
+            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+            df = df.fillna(0)
+            # print(df)
+            if len(df) > 0:
+                try:
+                    df_columns = list(df)
+                    table = "STK_DETAILS"
+                    columns = ",".join(df_columns)
+                    constraint = ', '.join(['NAME', 'NSE_CODE', 'STK_DATE'])
+                    print("Batch started with count {} to insert into DB = ", len(df.values))
+                    values = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
+                             "%s, %s, %s, %s, %s, %s, to_date(%s, 'YYYMONDD'), %s, %s, %s"
+                    # create INSERT INTO table (columns) VALUES('%s',...)
+                    insert_stmt = h.create_update_query(table, df_columns, values, constraint)
+                    curr, con = db.get_connection()
+                    execute_batch(curr, insert_stmt, df.values)
+                    con.commit()
+                    db.close_connection(con, curr)
+                    print("Batch inserted into DB successfully")
+
+                except Exception as err:
+                    print("While inserting data into DB exception = {}".format(err))
+
+    # pd.set_option('display.max_columns', 15)
+    # for category in final_data:
+    #     cat_up = category.upper()
+    #     print("CATEGORY = {} and count = {}".format(cat_up, len(final_data[category])))
+    #     df = pd.DataFrame(final_data[category])
+    #     df = df.set_index("NAME")
+    #     # Slice it as needed
+    #     sliced_df = df.loc[:, ['MARKET CAP (Rs Cr)', 'EPS (TTM)', 'P/E', 'INDUSTRY P/E', 'BOOK VALUE (Rs)',
+    #                            'FACE VALUE (Rs)', 'DIV YIELD.(%)']]
+    #     sliced_df = sliced_df.apply(pd.to_numeric, errors='ignore')
+    #     sorted_df = sliced_df.sort_values(by=['EPS (TTM)', 'P/E'], ascending=[False, False])
+    #     writer_orig = pd.ExcelWriter(os.path.join(commons.get_prop('base-path', 'output'), cat_up + '_Listings.xlsx'),
+    #                                  engine='xlsxwriter')
+    #     sorted_df.to_excel(writer_orig, index=True, sheet_name='report')
+    #     writer_orig.save()
 
         # Sort by  P/E
 
@@ -92,29 +124,10 @@ def mny_ctr_shr_frm_url(cmp_name, cmp_url):
     with print_lock:
         comp_details = {}
         try:
-            comp_details['NAME'] = cmp_name
-            elements = cmp_url.split("/")
-            if len(elements) > 5:
-                key = elements[5]
-                comp_details['CATEGORY'] = key
-            bs = h.parse_url(cmp_url)
-            if bs:
-                std_data = bs.find('div', {'id': 'mktdet_1'})
-                for each_div in std_data.findAll('div', attrs={'class': 'PA7 brdb'}):
-                    sub_div = each_div.descendants
-                    __tag_name, __tag_value = None, None
-                    for cd in sub_div:
-                        if cd.name == 'div' and cd.get('class', '') == ['FL', 'gL_10', 'UC']:
-                            __tag_name = cd.text
-                        if cd.name == 'div' and cd.get('class', '') == ['FR', 'gD_12']:
-                            __tag_value = cd.text
-                        if __tag_name and __tag_value:
-                            comp_details[__tag_name] = __tag_value
-                            __tag_name, __tag_value = None, None
-                # print("COMP DETAILS =", comp_details)
-
+            comp_details = mcp.mny_ctr_shr_frm_url(cmp_name, cmp_url)
+            print("processing url {} with result = {}".format(cmp_url, comp_details))
         except Exception as err:
-            log.err("mny_ctr_shr_frm_url ERROR = ", str(err))
+            print("mny_ctr_shr_frm_url ERROR = ", str(err))
             raise err
         return comp_details
 
