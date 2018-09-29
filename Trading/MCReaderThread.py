@@ -43,6 +43,7 @@ def get_shares_details(stock_url, thread_count):
         log.warning("Failed URL details = {}".format(failed_que.get()))
 
     final_data = {}
+    df_list = []
     while not results_que.empty():
         # final_data.append(results_que.get())
         tmp_dict = results_que.get()
@@ -52,31 +53,34 @@ def get_shares_details(stock_url, thread_count):
         pd.set_option('display.max_columns', None)
         pd.set_option('display.expand_frame_repr', False)
         pd.set_option('max_colwidth', 0)
+
         for category in final_data:
             df = pd.DataFrame(final_data[category])
             cols = df.columns.drop(['STK_DATE', 'NSE_CODE', 'NAME', 'CATEGORY', 'SUB_CATEGORY', 'URL'])
             df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
             df = df.fillna(0)
+            df_list.append(df)
             # print(df)
-            if len(df) > 0:
-                try:
-                    df_columns = list(df)
-                    table = "STK_DETAILS"
-                    columns = ",".join(df_columns)
-                    constraint = ', '.join(['NAME', 'NSE_CODE', 'STK_DATE'])
-                    print("Batch started with count {} to insert into DB = ", len(df.values))
-                    values = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
-                             "%s, %s, %s, %s, %s, %s, to_date(%s, 'YYYMONDD'), %s, %s, %s"
-                    # create INSERT INTO table (columns) VALUES('%s',...)
-                    insert_stmt = h.create_update_query(table, df_columns, values, constraint)
-                    curr, con = db.get_connection()
-                    execute_batch(curr, insert_stmt, df.values)
-                    con.commit()
-                    db.close_connection(con, curr)
-                    print("Batch inserted into DB successfully")
+    final_df = pd.concat(df_list, ignore_index=True)
+    if len(final_df) > 0:
+        try:
+            df_columns = list(final_df)
+            table = "MC_STK_DETAILS"
+            columns = ",".join(df_columns)
+            constraint = ', '.join(['NAME', 'NSE_CODE', 'STK_DATE'])
+            print("Batch started with count {} to insert into DB = ", len(final_df.values))
+            values = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
+                     "%s, %s, %s, %s, %s, %s, to_date(%s, 'YYYMONDD'), %s, %s, %s"
+            # create INSERT INTO table (columns) VALUES('%s',...)
+            insert_stmt = h.create_update_query(table, df_columns, values, constraint)
+            curr, con = db.get_connection()
+            execute_batch(curr, insert_stmt, final_df.values)
+            con.commit()
+            db.close_connection(con, curr)
+            print("Batch inserted into DB successfully")
 
-                except Exception as err:
-                    print("While inserting data into DB exception = {}".format(err))
+        except Exception as err:
+            print("While inserting data into DB exception = {}".format(err))
 
     # pd.set_option('display.max_columns', 15)
     # for category in final_data:

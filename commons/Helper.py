@@ -58,7 +58,7 @@ def create_update_query(table, df_columns, values, constraint):
                 DO UPDATE SET {updates};"""
     query.split()
     query = ' '.join(query.split())
-    print(query)
+    # print(query)
     return query
 
 

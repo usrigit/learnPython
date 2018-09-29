@@ -18,36 +18,27 @@ log = logging.getLogger("YAHOO_STK Perf Reader")
 
 
 def parse_yahoo_stk_hist(url):
+    df = None
     try:
         name = url.split("=")[1].split(".")[0]
         # print("Name = ", name)
         bs = h.parse_url(url)
         if bs:
+            print("IN_PROCESS = {} Parsing URL = {}".format(multi.current_process().name, url))
             table = bs.find('div', {'class': "Pb(10px) Ovx(a) W(100%)"}).find_all("table", {"class": "W(100%) M(0)"})[0]
             data = [
                        [td.string.strip() for td in tr.find_all('td') if td.string]
-                       for tr in table.find_all('tr')[2:]
+                       for tr in table.find_all('tr')[1:]
                    ][:-1]
             # print(data)
             # data.insert(0, ['STK_DATE', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'ACLOSE', 'VOLUME'])
             df = get_data_frame(data, name)
-            if len(df) > 0:
-                df_columns = list(df)
-                table = "STK_INFO_HISTORY"
-                constraint = ', '.join(['STK_DATE', 'NSE_CODE'])
-                values = "to_date(%s, 'DD-MON-YYYY'), %s, %s, %s, %s, %s, %s"
-                insert_stmt = h.create_update_query(table, df_columns, values, constraint)
-                conn = psycopg2.connect(database="trading",
-                                        user="postgres",
-                                        password="postgres")
-                conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-                cursor = conn.cursor()
-                execute_batch(cursor, insert_stmt, df.values)
-                conn.commit()
-                db.close_connection(conn, cursor)
+            # print(df)
+            return df
     except Exception as err:
         traceback.print_exc()
         print("Exception = ", str(err))
+    return df
 
 
 def get_data_frame(data, name):
@@ -86,7 +77,7 @@ def get_stk_history():
         worker.start()
 
     for job in jobs:
-        job.join(timeout=10)
+        job.join()
     print("All jobs completed......")
     print("Execution time = {0:.5f}".format(time.time() - start))
 
@@ -94,13 +85,37 @@ def get_stk_history():
 def process_page(data_array):
     print("Size of the data array from current process {} is {} "
           .format(multi.current_process().name, len(data_array)))
+    print("data array = ", data_array)
+    df_frames = []
     for url in data_array:
         try:
-            print("Parsing URL = ", url)
-            parse_yahoo_stk_hist(url)
+            print("PROCESS = {} Parsing URL = {}".format(multi.current_process().name, url))
+            df = parse_yahoo_stk_hist(url)
+            if df is not None and isinstance(df, pd.DataFrame) \
+                    and not df.empty:
+                df_frames.append(df)
         except Exception as err:
             print("Failed exception = ", str(err))
-    print("Completed Main process from {}".format(multi.current_process().name))
+    try:
+        result = pd.concat(df_frames, ignore_index=True)
+        if len(result) > 0:
+            df_columns = list(result)
+            table = "STK_INFO_HISTORY"
+            constraint = ', '.join(['STK_DATE', 'NSE_CODE'])
+            values = "to_date(%s, 'DD-MON-YYYY'), %s, %s, %s, %s, %s, %s"
+            insert_stmt = h.create_update_query(table, df_columns, values, constraint)
+            conn = psycopg2.connect(database="trading",
+                                    user="postgres",
+                                    password="postgres")
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            execute_batch(cursor, insert_stmt, result.values)
+            conn.commit()
+            db.close_connection(conn, cursor)
+
+    except Exception as err:
+        print("While inserting data into DB", str(err))
+    print("Completed Main process from {} and data frame size = {}".format(multi.current_process().name, len(df_frames)))
 
 
 def get_yahoo_fin_urls():
@@ -129,3 +144,4 @@ def get_yahoo_fin_urls():
 
 if __name__ == "__main__":
     get_stk_history()
+    # parse_yahoo_stk_hist('https://in.finance.yahoo.com/quote/INFIBEAM.BO/history?p=INFIBEAM.BO')
