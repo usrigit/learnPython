@@ -185,7 +185,7 @@ def get_listed_details(element):
                 day_trade.append(record.split(":")[1].strip())
     url = None
     for a in element.find_all('a', href=True):
-        if "http://www.chittorgarh.com/ipo/" in a['href']:
+        if "//www.chittorgarh.com/ipo/" in a['href']:
             url = a['href']
     print("FINAL URL = ", url)
     if url:
