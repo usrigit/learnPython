@@ -89,6 +89,7 @@ def process_page(data_array):
     df_frames = []
     for url in data_array:
         try:
+
             print("PROCESS = {} Parsing URL = {}".format(multi.current_process().name, url))
             df = parse_yahoo_stk_hist(url)
             if df is not None and isinstance(df, pd.DataFrame) \
